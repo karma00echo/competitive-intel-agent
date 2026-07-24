@@ -32,6 +32,15 @@ DELETE_ORDER = (
 )
 
 
+@pytest.fixture(scope="session")
+def fixture_pages() -> dict[str, str]:
+    pages_dir = PROJECT_ROOT / "tests" / "fixtures" / "pages"
+    return {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in pages_dir.glob("*.html")
+    }
+
+
 def _integration_settings() -> DatabaseSettings:
     load_dotenv(PROJECT_ROOT / ".env", override=False)
     full_url = os.getenv("TEST_DATABASE_URL")
@@ -97,4 +106,3 @@ def persistence(mysql_engine: Engine) -> Persistence:
     value = Persistence(Database(engine=mysql_engine))
     yield value
     _clear_rows(mysql_engine)
-

@@ -9,7 +9,9 @@ description = "A controlled, evidence-backed competitive intelligence agent."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "beautifulsoup4>=4.12,<5",
     "PyMySQL>=1.1,<2",
+    "requests>=2.32,<3",
     "SQLAlchemy>=2.0,<3",
     "python-dotenv>=1.0,<2",
 ]
@@ -29,4 +31,3 @@ testpaths = ["tests"]
 markers = [
     "integration: requires a disposable local MySQL test database",
 ]
-
