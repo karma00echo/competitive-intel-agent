@@ -91,6 +91,16 @@ class CompetitorRepository:
             {"id": competitor_id, "status": status},
         )
 
+    def update_official_domain(
+        self, session: Session, competitor_id: int, official_domain: str
+    ) -> None:
+        session.execute(
+            text(
+                "UPDATE competitors SET official_domain = :domain WHERE id = :id"
+            ),
+            {"id": competitor_id, "domain": official_domain},
+        )
+
     def delete(self, session: Session, competitor_id: int) -> None:
         session.execute(
             text("DELETE FROM competitors WHERE id = :id"), {"id": competitor_id}
@@ -155,6 +165,78 @@ class SourceRepository:
             ORDER BY source_type, id
             """,
             {"competitor_id": competitor_id, "source_type": source_type},
+        )
+
+    def find_by_normalized_url(
+        self, session: Session, competitor_id: int, normalized_url: str
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT * FROM sources
+            WHERE competitor_id = :competitor_id
+              AND normalized_url_hash = :normalized_url_hash
+            LIMIT 1
+            """,
+            {
+                "competitor_id": competitor_id,
+                "normalized_url_hash": sha256(
+                    normalized_url.encode("utf-8")
+                ).digest(),
+            },
+        )
+
+    def update_verification(
+        self,
+        session: Session,
+        source_id: int,
+        *,
+        source_type: str,
+        url: str,
+        normalized_url: str,
+        domain: str,
+        verification_status: str,
+        verification_reason: str,
+        confidence: Decimal | float,
+        verified_at: datetime | None,
+        is_active: bool = True,
+    ) -> None:
+        session.execute(
+            text(
+                """
+                UPDATE sources
+                SET source_type = :source_type, url = :url,
+                    normalized_url = :normalized_url,
+                    normalized_url_hash = :normalized_url_hash,
+                    domain = :domain,
+                    verification_status = :verification_status,
+                    verification_reason = :verification_reason,
+                    confidence = :confidence, verified_at = :verified_at,
+                    is_active = :is_active
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": source_id,
+                "source_type": source_type,
+                "url": url,
+                "normalized_url": normalized_url,
+                "normalized_url_hash": sha256(
+                    normalized_url.encode("utf-8")
+                ).digest(),
+                "domain": domain,
+                "verification_status": verification_status,
+                "verification_reason": verification_reason,
+                "confidence": confidence,
+                "verified_at": verified_at,
+                "is_active": is_active,
+            },
+        )
+
+    def deactivate(self, session: Session, source_id: int) -> None:
+        session.execute(
+            text("UPDATE sources SET is_active = FALSE WHERE id = :id"),
+            {"id": source_id},
         )
 
     def delete(self, session: Session, source_id: int) -> None:

@@ -1,0 +1,10 @@
+{
+  "pages": {
+    "https://www.notion.so/": "notion_home.html",
+    "https://www.notion.so/product": "notion_product.html",
+    "https://www.notion.so/pricing": "notion_pricing.html",
+    "https://www.notion.so/releases": "notion_releases.html",
+    "https://www.feishu.cn/": "feishu_home.html",
+    "https://www.feishu.cn/product": "feishu_product.html"
+  }
+}

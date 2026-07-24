@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from os import getenv
 from pathlib import Path
 
@@ -55,8 +55,16 @@ class DatabaseSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchSettings:
+    provider: str = "fixture"
+    api_key: str | None = None
+    endpoint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
+    search: SearchSettings = field(default_factory=SearchSettings)
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = ".env") -> "Settings":
@@ -79,5 +87,10 @@ class Settings:
                     getenv("DB_CONNECT_TIMEOUT_SECONDS", "10")
                 ),
                 echo=_as_bool(getenv("DB_ECHO")),
-            )
+            ),
+            search=SearchSettings(
+                provider=getenv("SEARCH_PROVIDER", "fixture"),
+                api_key=getenv("SEARCH_API_KEY") or None,
+                endpoint=getenv("SEARCH_ENDPOINT") or None,
+            ),
         )

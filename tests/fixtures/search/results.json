@@ -1,0 +1,26 @@
+{
+  "datasets": {
+    "Notion": {
+      "OFFICIAL_SITE": [
+        {"title": "Notion – Your connected workspace", "url": "https://www.notion.so/?utm_source=ad", "snippet": "Write, plan and organize in one workspace."},
+        {"title": "Notion - Wikipedia", "url": "https://en.wikipedia.org/wiki/Notion_(product)", "snippet": "Encyclopedia article."},
+        {"title": "Notion launches new tools", "url": "https://techcrunch.com/notion-news", "snippet": "Technology news."},
+        {"title": "Notion on the App Store", "url": "https://apps.apple.com/app/notion/id123", "snippet": "Download the mobile app."},
+        {"title": "Notion reviews", "url": "https://www.g2.com/products/notion/reviews", "snippet": "Third-party reviews."},
+        {"title": "Notion sponsored", "url": "https://googleadservices.com/pagead/aclk?utm_campaign=notion", "snippet": "Advertisement."}
+      ],
+      "FEATURES": [{"title": "Notion Product", "url": "https://www.notion.so/product", "snippet": "Official product features."}],
+      "PRICING": [{"title": "Notion Pricing", "url": "https://www.notion.so/pricing", "snippet": "Official plans and pricing."}],
+      "CHANGELOG": [{"title": "Notion Releases", "url": "https://www.notion.so/releases", "snippet": "Official product updates."}]
+    },
+    "飞书": {
+      "OFFICIAL_SITE": [
+        {"title": "飞书 - 先进企业协作与管理平台", "url": "https://www.feishu.cn/", "snippet": "飞书官方网站。"},
+        {"title": "飞书 - 百度百科", "url": "https://baike.baidu.com/item/%E9%A3%9E%E4%B9%A6", "snippet": "百科页面。"}
+      ],
+      "FEATURES": [{"title": "飞书产品", "url": "https://www.feishu.cn/product", "snippet": "官方产品功能。"}],
+      "PRICING": [],
+      "CHANGELOG": []
+    }
+  }
+}
