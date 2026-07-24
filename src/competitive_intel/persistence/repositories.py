@@ -411,6 +411,28 @@ class ProductFactRepository:
             {"run_id": run_id},
         )
 
+    def list_for_snapshot(
+        self, session: Session, snapshot_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            "SELECT * FROM product_facts WHERE snapshot_id = :snapshot_id ORDER BY id",
+            {"snapshot_id": snapshot_id},
+        )
+
+    def find_by_snapshot_key(
+        self, session: Session, snapshot_id: int, fact_key: str
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT * FROM product_facts
+            WHERE snapshot_id = :snapshot_id AND fact_key = :fact_key
+            LIMIT 1
+            """,
+            {"snapshot_id": snapshot_id, "fact_key": fact_key},
+        )
+
 
 class ChangeRepository:
     def create(

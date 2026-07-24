@@ -1,0 +1,181 @@
+{
+  "pages": {
+    "https://www.notion.so/": [
+      {
+        "fact_category": "POSITIONING",
+        "fact_value": {
+          "primary_positioning": "connected workspace",
+          "target_users": [],
+          "primary_use_cases": ["docs", "projects", "knowledge"],
+          "deployment_type": null,
+          "public_description": "Your connected workspace for docs, projects, and knowledge."
+        },
+        "value_text": "Your connected workspace for docs, projects, and knowledge.",
+        "evidence_text": "Your connected workspace for docs, projects, and knowledge.",
+        "confidence": 0.98
+      }
+    ],
+    "https://www.notion.so/product": [
+      {
+        "fact_category": "FEATURE",
+        "fact_value": {
+          "feature_name": "Collaborative Docs",
+          "normalized_feature_name": "collaborative docs",
+          "feature_description": "Teams can write and edit together.",
+          "feature_category": "DOCUMENTS",
+          "availability": null,
+          "related_plan": null,
+          "status": "AVAILABLE"
+        },
+        "value_text": "Collaborative Docs",
+        "evidence_text": "Collaborative Docs let teams write and edit together.",
+        "confidence": 0.97
+      },
+      {
+        "fact_category": "FEATURE",
+        "fact_value": {
+          "feature_name": "Notion AI",
+          "normalized_feature_name": "notion ai",
+          "feature_description": "Helps teams draft and summarize content.",
+          "feature_category": "AI",
+          "availability": null,
+          "related_plan": null,
+          "status": "AVAILABLE"
+        },
+        "value_text": "Notion AI",
+        "evidence_text": "Notion AI helps teams draft and summarize content.",
+        "confidence": 0.97
+      }
+    ],
+    "https://www.notion.so/pricing": [
+      {
+        "fact_category": "PLAN",
+        "fact_value": {
+          "plan_name": "Plus",
+          "normalized_plan_name": "plus",
+          "plan_description": "Plus plan",
+          "target_user": null,
+          "included_features": [],
+          "public_status": "PUBLIC"
+        },
+        "value_text": "Plus plan",
+        "evidence_text": "Plus plan costs $10 per user / month, billed annually.",
+        "confidence": 0.98
+      },
+      {
+        "fact_category": "PRICE",
+        "fact_value": {
+          "plan_name": "Plus",
+          "amount": "10.00",
+          "currency": "USD",
+          "billing_period": "MONTH",
+          "billing_unit": "USER",
+          "billing_commitment": "ANNUAL_BILLING",
+          "region": null,
+          "tax_status": "UNKNOWN",
+          "public_status": "PUBLIC"
+        },
+        "value_text": "$10 per user / month, billed annually",
+        "evidence_text": "Plus plan costs $10 per user / month, billed annually.",
+        "confidence": 0.99
+      },
+      {
+        "fact_category": "PRICE",
+        "fact_value": {
+          "plan_name": "Plus",
+          "amount": "12",
+          "currency": "USD",
+          "billing_period": "MONTH",
+          "billing_unit": "USER",
+          "billing_commitment": "MONTHLY_BILLING",
+          "region": null,
+          "tax_status": "UNKNOWN",
+          "public_status": "PUBLIC"
+        },
+        "value_text": "$12 per user / month, billed monthly",
+        "evidence_text": "Plus plan costs $12 per user / month, billed monthly.",
+        "confidence": 0.99
+      },
+      {
+        "fact_category": "PLAN",
+        "fact_value": {
+          "plan_name": "Enterprise",
+          "normalized_plan_name": "enterprise",
+          "plan_description": "Enterprise plan",
+          "target_user": null,
+          "included_features": [],
+          "public_status": "CONTACT_SALES"
+        },
+        "value_text": "Enterprise plan",
+        "evidence_text": "Enterprise plan: Contact Sales.",
+        "confidence": 0.99
+      },
+      {
+        "fact_category": "PRICE",
+        "fact_value": {
+          "plan_name": "Enterprise",
+          "amount": null,
+          "currency": null,
+          "billing_period": "UNKNOWN",
+          "billing_unit": "UNKNOWN",
+          "billing_commitment": "UNKNOWN",
+          "region": null,
+          "tax_status": "UNKNOWN",
+          "public_status": "CONTACT_SALES"
+        },
+        "value_text": "Contact Sales",
+        "evidence_text": "Enterprise plan: Contact Sales.",
+        "confidence": 0.99
+      }
+    ],
+    "https://www.notion.so/releases": [
+      {
+        "fact_category": "PRODUCT_UPDATE",
+        "fact_value": {
+          "update_title": "Enterprise Search",
+          "published_date": "2026-07-15",
+          "update_type": "FEATURE_RELEASE",
+          "affected_features": ["Enterprise Search"],
+          "summary": "Available for workspace search.",
+          "availability": "AVAILABLE",
+          "status": "AVAILABLE"
+        },
+        "value_text": "Enterprise Search",
+        "evidence_text": "July 15, 2026: Enterprise Search is now available for workspace search.",
+        "confidence": 0.98
+      }
+    ],
+    "https://www.feishu.cn/": [
+      {
+        "fact_category": "POSITIONING",
+        "fact_value": {
+          "primary_positioning": "一站式企业协作",
+          "target_users": ["企业"],
+          "primary_use_cases": ["协作"],
+          "deployment_type": null,
+          "public_description": "飞书提供一站式企业协作。"
+        },
+        "value_text": "一站式企业协作",
+        "evidence_text": "飞书提供一站式企业协作。",
+        "confidence": 0.98
+      }
+    ],
+    "https://www.feishu.cn/product": [
+      {
+        "fact_category": "FEATURE",
+        "fact_value": {
+          "feature_name": "项目协作",
+          "normalized_feature_name": "项目协作",
+          "feature_description": "项目协作",
+          "feature_category": "COLLABORATION",
+          "availability": null,
+          "related_plan": null,
+          "status": "AVAILABLE"
+        },
+        "value_text": "项目协作",
+        "evidence_text": "沟通、文档与项目协作。",
+        "confidence": 0.95
+      }
+    ]
+  }
+}

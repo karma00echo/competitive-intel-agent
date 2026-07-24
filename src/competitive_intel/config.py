@@ -62,9 +62,18 @@ class SearchSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LLMSettings:
+    provider: str = "fixture"
+    api_key: str | None = None
+    model: str | None = None
+    endpoint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
     search: SearchSettings = field(default_factory=SearchSettings)
+    llm: LLMSettings = field(default_factory=LLMSettings)
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = ".env") -> "Settings":
@@ -92,5 +101,11 @@ class Settings:
                 provider=getenv("SEARCH_PROVIDER", "fixture"),
                 api_key=getenv("SEARCH_API_KEY") or None,
                 endpoint=getenv("SEARCH_ENDPOINT") or None,
+            ),
+            llm=LLMSettings(
+                provider=getenv("LLM_PROVIDER", "fixture"),
+                api_key=getenv("LLM_API_KEY") or None,
+                model=getenv("LLM_MODEL") or None,
+                endpoint=getenv("LLM_ENDPOINT") or None,
             ),
         )

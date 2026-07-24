@@ -10,10 +10,13 @@ The repository currently contains:
   content hashes, persisted snapshots, and page-level change detection;
 - phase three: provider-neutral search, deterministic queries, URL
   normalization, official-source validation, official-page discovery, and
-  verified source persistence.
+  verified source persistence;
+- phase four: structured fact schemas, provider-neutral extraction,
+  deterministic evidence validation, stable fact keys, and confirmed fact
+  persistence.
 
-Fact extraction, model tool calling, reports, and the complete CLI workflow
-are not implemented yet.
+Fact-level history comparison, Agent Tool Calling, reports, and the complete
+CLI workflow are not implemented yet.
 
 ## Requirements
 
@@ -115,6 +118,62 @@ make tests depend on network availability, credentials, quotas, changing
 rankings, and potentially paid requests. Fixture mode proves the complete
 source-discovery control flow without those variables.
 
+## Phase-four structured facts
+
+`FactExtractionService` reads only `VERIFIED` active sources and their latest
+successful snapshots. It selects schemas by source type, calls a
+`FactExtractionProvider`, validates the payload, checks exact evidence, creates
+stable keys, removes duplicates, and saves only confirmed `FACT` statements
+through `Persistence`.
+
+Supported categories and important fields:
+
+| Category | Structured fields |
+|---|---|
+| `POSITIONING` | primary positioning, target users, use cases, deployment, public description |
+| `FEATURE` | name, normalized name, description, finite category, availability, related plan, status |
+| `PLAN` | name, normalized name, description, target user, included features, public status |
+| `PRICE` | plan, decimal amount, currency, period, unit, commitment, region, tax status, public status |
+| `PRODUCT_UPDATE` | title, explicit published date, type, affected features, summary, availability, status |
+
+Fixture extraction reads `tests/fixtures/facts/facts.json`; it makes no model
+or network calls. The demonstration prepares fixture sources and successful
+fixture snapshots when needed:
+
+```powershell
+python scripts/extract_competitor_facts.py "Notion" --provider fixture
+python scripts/extract_competitor_facts.py "飞书" --provider fixture --language zh
+```
+
+Each candidate must use `statement_type=FACT`, pass its category schema, and
+include an evidence fragment found in the snapshot's `clean_content` after
+only Unicode and whitespace normalization. Price evidence additionally has to
+support the plan name, amount, currency, billing period, billing unit, and
+billing commitment. Missing evidence is `INSUFFICIENT_EVIDENCE`; contradictory
+values are `CONFLICTING`; invalid fields are `INVALID_SCHEMA`. None of these
+states is persisted.
+
+Stable keys exclude the competitor name. Examples:
+
+```text
+positioning.primary
+feature.collaborative_docs
+plan.business
+price.business.month.user.annual_billing
+product_update.2026_07_15_enterprise_search
+```
+
+Keys normalize Unicode, case, whitespace, names, and decimal amounts. Price
+period, unit, and commitment remain separate dimensions. A matching
+snapshot/key is treated as `DUPLICATE`, making repeated extraction idempotent.
+
+To add a real model, implement `FactExtractionProvider` and register it in a
+future provider factory. Read `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, and
+`LLM_ENDPOINT` from configuration. The adapter must send bounded snapshot
+content, require strict JSON and exact evidence, and must not use model
+knowledge or web search to fill missing facts. Real model access is not part of
+phase-four acceptance and is never used by default tests.
+
 ## Phase-two page states
 
 | State | Meaning |
@@ -162,16 +221,19 @@ python -m pytest tests/integration/test_snapshot_service.py -v
 Default tests never contact the public internet. Fetcher tests use mocked
 requests responses and fixed HTML fixtures; snapshot tests use the same fixed
 content with a disposable local MySQL database. Source-discovery tests use
-fixed search JSON and official-site HTML. This keeps ranking, timeout,
-redirect, content-size, JavaScript-shell, validation, and discovery results
-reproducible.
+fixed search JSON and official-site HTML. Fact-extraction tests use the JSON
+fixture provider and never call a model API or incur model charges. This keeps
+ranking, timeout, redirect, content-size, JavaScript-shell, validation,
+discovery, extraction, and evidence results reproducible.
 
 ## Not implemented yet
 
-- fact extraction and fact-level history comparison
+- fact-level history comparison
 - Agent Tool Calling and model APIs
 - report generation
 - complete CLI business workflow
 - frontend, scheduling, Playwright, RAG, and vector databases
 - a real search-provider adapter; future configuration requires
   `SEARCH_PROVIDER`, `SEARCH_API_KEY`, and `SEARCH_ENDPOINT`
+- a real model fact-extraction adapter; future configuration requires
+  `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, and `LLM_ENDPOINT`
