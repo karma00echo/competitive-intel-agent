@@ -16,6 +16,8 @@ from competitive_intel.domain.webpage import PageChangeStatus
 from competitive_intel.persistence import Persistence
 
 from .fact_extraction_service import FactExtractionService
+from .fact_history_service import FactHistoryService
+from .report_service import CompetitorReportService
 from .snapshot_service import SnapshotService
 from .source_discovery_service import SourceDiscoveryService
 
@@ -52,6 +54,9 @@ STATUS_STATES = frozenset(
         AgentState.SOURCE_DISCOVERY,
         AgentState.PAGE_FETCHING,
         AgentState.FACT_EXTRACTION,
+        AgentState.HISTORY_LOOKUP,
+        AgentState.FACT_COMPARISON,
+        AgentState.REPORT_GENERATION,
         AgentState.RUN_SUMMARY,
     }
 )
@@ -97,6 +102,51 @@ TOOL_DEFINITIONS = {
             ("competitor_name",),
         ),
         frozenset({AgentState.FACT_EXTRACTION}),
+    ),
+    "get_previous_fact_baseline": ToolDefinition(
+        "get_previous_fact_baseline",
+        "Read the previous successful fact baseline for this competitor.",
+        _object_schema(
+            {
+                "competitor_name": {"type": "string", "minLength": 1},
+                "current_run_id": {"type": "integer"},
+            },
+            ("competitor_name", "current_run_id"),
+        ),
+        frozenset({AgentState.HISTORY_LOOKUP}),
+    ),
+    "compare_competitor_facts": ToolDefinition(
+        "compare_competitor_facts",
+        "Deterministically compare and persist current facts against the baseline.",
+        _object_schema(
+            {
+                "competitor_name": {"type": "string", "minLength": 1},
+                "current_run_id": {"type": "integer"},
+            },
+            ("competitor_name", "current_run_id"),
+        ),
+        frozenset({AgentState.FACT_COMPARISON}),
+    ),
+    "generate_competitor_report": ToolDefinition(
+        "generate_competitor_report",
+        "Generate and persist a deterministic baseline or change report.",
+        _object_schema(
+            {"competitor_name": {"type": "string", "minLength": 1}},
+            ("competitor_name",),
+        ),
+        frozenset({AgentState.REPORT_GENERATION}),
+    ),
+    "get_competitor_report": ToolDefinition(
+        "get_competitor_report",
+        "Read bounded report content and metadata.",
+        _object_schema(
+            {
+                "report_id": {"type": ["integer", "null"]},
+                "run_id": {"type": ["integer", "null"]},
+                "competitor_name": {"type": ["string", "null"]},
+            }
+        ),
+        frozenset({AgentState.RUN_SUMMARY}),
     ),
     "get_run_status": ToolDefinition(
         "get_run_status",
@@ -149,11 +199,15 @@ class AgentToolExecutor:
         source_discovery: SourceDiscoveryService,
         snapshots: SnapshotService,
         facts: FactExtractionService,
+        history: FactHistoryService | None = None,
+        reports: CompetitorReportService | None = None,
     ) -> None:
         self._persistence = persistence
         self._source_discovery = source_discovery
         self._snapshots = snapshots
         self._facts = facts
+        self._history = history or FactHistoryService(persistence)
+        self._reports = reports or CompetitorReportService(persistence)
         self._handlers: dict[
             str, Callable[[dict[str, Any], ControlledRunContext], ToolResult]
         ] = {
@@ -161,6 +215,10 @@ class AgentToolExecutor:
             "discover_competitor_sources": self._discover_sources,
             "refresh_verified_sources": self._refresh_sources,
             "extract_competitor_facts": self._extract_facts,
+            "get_previous_fact_baseline": self._get_previous_fact_baseline,
+            "compare_competitor_facts": self._compare_competitor_facts,
+            "generate_competitor_report": self._generate_competitor_report,
+            "get_competitor_report": self._get_competitor_report,
             "get_run_status": self._get_run_status,
             "finalize_run_summary": self._finalize_summary,
         }
@@ -375,6 +433,7 @@ class AgentToolExecutor:
                 "confirmed_count": len(result.saved),
                 "rejected_count": len(result.rejected),
                 "duplicate_count": result.duplicate_count,
+                "historical_reuse_count": result.historical_reuse_count,
                 "confirmed": confirmed,
                 "rejected": rejected,
                 "warnings": list(result.warnings[:20]),
@@ -383,6 +442,141 @@ class AgentToolExecutor:
             error_code=None if result.saved else "NO_CONFIRMED_FACTS",
             error_message=None if result.saved else "No current facts passed evidence validation.",
             retryable=False,
+        )
+
+    def establish_baseline(self, context: ControlledRunContext) -> int:
+        if context.competitor_id is None:
+            raise ValueError("Cannot establish a baseline without a competitor.")
+        return self._history.establish_baseline(
+            context.competitor_id, context.run_id
+        )
+
+    def _get_previous_fact_baseline(
+        self, arguments: dict[str, Any], context: ControlledRunContext
+    ) -> ToolResult:
+        if (
+            context.competitor_id is None
+            or arguments["current_run_id"] != context.run_id
+        ):
+            return ToolResult(
+                False,
+                error_code="INVALID_HISTORY_CONTEXT",
+                error_message="Run or competitor does not match controlled context.",
+            )
+        baseline = self._history.get_previous_baseline(
+            context.competitor_id, context.run_id
+        )
+        context.previous_successful_run_id = baseline.previous_successful_run_id
+        return ToolResult(
+            baseline.previous_successful_run_id is not None,
+            {
+                "previous_successful_run_id": baseline.previous_successful_run_id,
+                "previous_fact_count": baseline.previous_fact_count,
+                "current_fact_count": baseline.current_fact_count,
+                "comparable_source_count": baseline.comparable_source_count,
+                "warnings": list(baseline.warnings),
+                "errors": [],
+            },
+            error_code=(
+                None
+                if baseline.previous_successful_run_id is not None
+                else "NO_PREVIOUS_FACT_BASELINE"
+            ),
+            error_message=(
+                None
+                if baseline.previous_successful_run_id is not None
+                else "No previous successful fact baseline was found."
+            ),
+        )
+
+    def _compare_competitor_facts(
+        self, arguments: dict[str, Any], context: ControlledRunContext
+    ) -> ToolResult:
+        if (
+            context.competitor_id is None
+            or context.previous_successful_run_id is None
+            or arguments["current_run_id"] != context.run_id
+        ):
+            return ToolResult(
+                False,
+                error_code="MISSING_COMPARISON_BASELINE",
+                error_message="A controlled previous baseline is required.",
+            )
+        persisted = self._history.compare_and_persist(
+            context.competitor_id,
+            context.run_id,
+            context.previous_successful_run_id,
+        )
+        return ToolResult(
+            not persisted.result.errors,
+            {
+                **persisted.result.summary_counts,
+                "change_ids": list(persisted.change_ids[:100]),
+                "warnings": list(persisted.result.warnings[:20]),
+                "errors": list(persisted.result.errors[:20]),
+            },
+            error_code=(
+                "FACT_COMPARISON_FAILED" if persisted.result.errors else None
+            ),
+            error_message=(
+                "; ".join(persisted.result.errors[:3])
+                if persisted.result.errors else None
+            ),
+        )
+
+    def _generate_competitor_report(
+        self, arguments: dict[str, Any], context: ControlledRunContext
+    ) -> ToolResult:
+        del arguments
+        if context.competitor_id is None or context.run_mode is None:
+            return ToolResult(
+                False,
+                error_code="INVALID_REPORT_CONTEXT",
+                error_message="Report generation requires competitor and run mode.",
+            )
+        report = self._reports.generate(
+            context.competitor_id, context.run_id, context.run_mode
+        )
+        return ToolResult(
+            True,
+            {
+                "report_id": report.report_id,
+                "report_type": report.report_type,
+                "title": report.title,
+                "executive_summary": report.executive_summary[:1000],
+                "section_count": report.section_count,
+                "change_summary": report.change_summary,
+                "warnings": list(report.warnings[:20]),
+                "errors": [],
+            },
+        )
+
+    def _get_competitor_report(
+        self, arguments: dict[str, Any], context: ControlledRunContext
+    ) -> ToolResult:
+        report = self._reports.get(
+            report_id=arguments.get("report_id"),
+            run_id=arguments.get("run_id"),
+            competitor_name=arguments.get("competitor_name"),
+            latest=bool(arguments.get("competitor_name")),
+        )
+        if report is None:
+            return ToolResult(
+                False,
+                error_code="REPORT_NOT_FOUND",
+                error_message="Requested report was not found.",
+            )
+        return ToolResult(
+            True,
+            {
+                "report_id": report.report_id,
+                "report_type": report.report_type,
+                "title": report.title,
+                "content_markdown": report.content_markdown[:5000],
+                "change_summary": report.change_summary,
+                "warnings": list(report.warnings[:20]),
+                "errors": [],
+            },
         )
 
     def _get_run_status(
@@ -422,7 +616,7 @@ class AgentToolExecutor:
             snapshots = self._persistence.snapshots.list_for_run(
                 session, context.run_id
             )
-            facts = self._persistence.product_facts.list_for_run(
+            facts = self._persistence.fact_observations.list_for_run(
                 session, context.run_id
             )
         page_data = context.tool_results.get(
@@ -430,6 +624,12 @@ class AgentToolExecutor:
         ).data.get("pages", [])
         fact_data = context.tool_results.get(
             "extract_competitor_facts", ToolResult(True)
+        ).data
+        report_data = context.tool_results.get(
+            "generate_competitor_report", ToolResult(True)
+        ).data
+        comparison_data = context.tool_results.get(
+            "compare_competitor_facts", ToolResult(True)
         ).data
         official = next(
             (
@@ -471,6 +671,18 @@ class AgentToolExecutor:
             tool_call_count=context.tool_call_count,
             warnings=tuple(context.warnings[-50:]),
             errors=tuple(context.errors[-50:]),
+            report_id=report_data.get("report_id"),
+            report_type=report_data.get("report_type"),
+            added_count=int(comparison_data.get("added_count", 0)),
+            removed_count=int(comparison_data.get("removed_count", 0)),
+            modified_count=int(comparison_data.get("modified_count", 0)),
+            unchanged_count=int(comparison_data.get("unchanged_count", 0)),
+            uncomparable_count=int(
+                comparison_data.get("uncomparable_count", 0)
+            ),
+            historical_reuse_count=int(
+                fact_data.get("historical_reuse_count", 0)
+            ),
         )
         context.summary = summary
         return ToolResult(True, {"summary": asdict(summary)})

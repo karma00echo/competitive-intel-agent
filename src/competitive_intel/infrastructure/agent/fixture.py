@@ -16,6 +16,9 @@ DEFAULT_TOOL_BY_STATE = {
     AgentState.SOURCE_DISCOVERY: "discover_competitor_sources",
     AgentState.PAGE_FETCHING: "refresh_verified_sources",
     AgentState.FACT_EXTRACTION: "extract_competitor_facts",
+    AgentState.HISTORY_LOOKUP: "get_previous_fact_baseline",
+    AgentState.FACT_COMPARISON: "compare_competitor_facts",
+    AgentState.REPORT_GENERATION: "generate_competitor_report",
     AgentState.RUN_SUMMARY: "finalize_run_summary",
 }
 
@@ -80,8 +83,21 @@ class FixtureAgentProvider:
             "get_competitor_profile",
             "refresh_verified_sources",
             "extract_competitor_facts",
+            "get_previous_fact_baseline",
+            "compare_competitor_facts",
+            "generate_competitor_report",
         }:
-            arguments = {"competitor_name": competitor}
+            arguments = {
+                "competitor_name": competitor,
+                **(
+                    {"current_run_id": int(request.run_context["run_id"])}
+                    if tool_name in {
+                        "get_previous_fact_baseline",
+                        "compare_competitor_facts",
+                    }
+                    else {}
+                ),
+            }
         else:
             arguments = {}
         return AgentToolCall(

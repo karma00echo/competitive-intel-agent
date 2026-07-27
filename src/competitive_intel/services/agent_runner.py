@@ -43,6 +43,11 @@ PERSISTED_STATE = {
     AgentState.SNAPSHOT_PERSISTENCE: "PAGE_FETCHING",
     AgentState.FACT_EXTRACTION: "FACT_EXTRACTION",
     AgentState.FACT_PERSISTENCE: "FACT_EXTRACTION",
+    AgentState.HISTORY_LOOKUP: "HISTORY_COMPARISON",
+    AgentState.FACT_COMPARISON: "HISTORY_COMPARISON",
+    AgentState.CHANGE_PERSISTENCE: "HISTORY_COMPARISON",
+    AgentState.REPORT_GENERATION: "REPORT_GENERATION",
+    AgentState.REPORT_PERSISTENCE: "REPORT_GENERATION",
     AgentState.RUN_SUMMARY: "REPORT_GENERATION",
     AgentState.COMPLETED: "COMPLETED",
     AgentState.COMPLETED_WITH_WARNINGS: "COMPLETED",
@@ -393,6 +398,29 @@ class AgentRunner:
             stage_id = self._transition(
                 context, stage_id, AgentState.FACT_PERSISTENCE
             )
+            if context.run_mode == RunMode.BASELINE:
+                self._tools.establish_baseline(context)
+                return self._transition(
+                    context, stage_id, AgentState.REPORT_GENERATION
+                )
+            return self._transition(
+                context, stage_id, AgentState.HISTORY_LOOKUP
+            )
+        if tool_name == "get_previous_fact_baseline":
+            return self._transition(
+                context, stage_id, AgentState.FACT_COMPARISON
+            )
+        if tool_name == "compare_competitor_facts":
+            stage_id = self._transition(
+                context, stage_id, AgentState.CHANGE_PERSISTENCE
+            )
+            return self._transition(
+                context, stage_id, AgentState.REPORT_GENERATION
+            )
+        if tool_name == "generate_competitor_report":
+            stage_id = self._transition(
+                context, stage_id, AgentState.REPORT_PERSISTENCE
+            )
             return self._transition(
                 context, stage_id, AgentState.RUN_SUMMARY
             )
@@ -571,8 +599,8 @@ class AgentRunner:
     @staticmethod
     def _clean_input(value: str) -> str:
         cleaned = value.strip()
-        if cleaned.casefold().startswith("分析 "):
-            cleaned = cleaned[3:].strip()
+        if cleaned.casefold().startswith("分析"):
+            cleaned = cleaned[2:].strip()
         if not cleaned or len(cleaned) > 255:
             raise ValueError("Competitor name must contain 1 to 255 characters.")
         return cleaned

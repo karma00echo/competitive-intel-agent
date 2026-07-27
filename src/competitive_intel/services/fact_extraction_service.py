@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from time import perf_counter
 
 from competitive_intel.domain.evidence import EvidenceChecker
+from competitive_intel.domain.fact_comparison import FactNormalizer
 from competitive_intel.domain.fact_normalization import normalize_fact
 from competitive_intel.domain.fact_schema import REQUIRED
 from competitive_intel.domain.facts import (
@@ -41,6 +43,7 @@ class FactExtractionService:
         self._provider = provider
         self._checker = evidence_checker or EvidenceChecker()
         self._limits = limits or FactExtractionLimits()
+        self._history_normalizer = FactNormalizer()
 
     def extract(
         self,
@@ -55,6 +58,8 @@ class FactExtractionService:
         rejected: list[RejectedFact] = []
         candidate_count = 0
         duplicate_count = 0
+        historical_reuse_count = 0
+        run_seen_keys: set[tuple[str, str]] = set()
         normalized_name = competitor_name.strip().casefold()
 
         with self._persistence.transaction() as session:
@@ -64,7 +69,7 @@ class FactExtractionService:
         if competitor is None:
             return FactExtractionResult(
                 competitor_name, None, None, self._provider.name, (), (), 0,
-                (), (), 0, (), ("Competitor was not found.",),
+                (), (), 0, 0, (), ("Competitor was not found.",),
             )
 
         owns_run = run_id is None
@@ -247,6 +252,30 @@ class FactExtractionService:
                     normalize_fact(candidate),
                     evidence_status=EvidenceCheckStatus.CONFIRMED,
                 )
+                identity = (
+                    normalized.fact_category.value,
+                    normalized.fact_key or "",
+                )
+                if identity in run_seen_keys:
+                    duplicate_count += 1
+                    rejected.append(
+                        RejectedFact(
+                            normalized,
+                            EvidenceCheckStatus.DUPLICATE,
+                            "Fact identity already observed in this extraction run.",
+                            source["url"],
+                            snapshot["id"],
+                        )
+                    )
+                    continue
+                business_value = self._history_normalizer.normalize(
+                    normalized.fact_category.value, normalized.fact_value
+                )
+                canonical = self._history_normalizer.canonical_json(
+                    normalized.fact_category.value, normalized.fact_value
+                )
+                value_hash = sha256(canonical.encode("utf-8")).hexdigest()
+                observed_at = datetime.now(UTC).replace(tzinfo=None)
                 with self._persistence.transaction() as session:
                     existing_fact = self._persistence.product_facts.find_by_snapshot_key(
                         session, snapshot["id"], normalized.fact_key or ""
@@ -261,22 +290,79 @@ class FactExtractionService:
                             )
                         )
                         continue
-                    fact_id = self._persistence.product_facts.create(
+                    current_fact = self._persistence.fact_versions.find_current(
                         session,
-                        competitor_id=competitor["id"],
-                        run_id=run_id,
-                        snapshot_id=snapshot["id"],
-                        fact_category=normalized.fact_category.value,
-                        fact_key=normalized.fact_key or "",
-                        fact_value=normalized.fact_value,
-                        value_text=normalized.value_text,
-                        statement_type="FACT",
-                        source_url=source["url"],
-                        evidence_text=normalized.evidence_text,
-                        confidence=normalized.confidence,
-                        evidence_status="CONFIRMED",
-                        extracted_at=datetime.now(UTC).replace(tzinfo=None),
+                        competitor["id"],
+                        normalized.fact_category.value,
+                        normalized.fact_key or "",
                     )
+                    latest_fact = current_fact or (
+                        self._persistence.fact_versions.find_latest(
+                            session,
+                            competitor["id"],
+                            normalized.fact_category.value,
+                            normalized.fact_key or "",
+                        )
+                    )
+                    if (
+                        current_fact
+                        and (
+                            current_fact["normalized_value_hash"] == value_hash
+                            or self._history_normalizer.canonical_json(
+                                normalized.fact_category.value,
+                                current_fact["normalized_value"],
+                            )
+                            == canonical
+                        )
+                    ):
+                        fact_id = int(current_fact["id"])
+                        historical_reuse_count += 1
+                    else:
+                        fact_id = self._persistence.product_facts.create(
+                            session,
+                            competitor_id=competitor["id"],
+                            run_id=run_id,
+                            snapshot_id=snapshot["id"],
+                            fact_category=normalized.fact_category.value,
+                            fact_key=normalized.fact_key or "",
+                            fact_value=normalized.fact_value,
+                            value_text=normalized.value_text,
+                            statement_type="FACT",
+                            source_url=source["url"],
+                            evidence_text=normalized.evidence_text,
+                            confidence=normalized.confidence,
+                            evidence_status="CONFIRMED",
+                            extracted_at=observed_at,
+                        )
+                        self._persistence.fact_versions.create(
+                            session,
+                            fact_id=fact_id,
+                            competitor_id=competitor["id"],
+                            source_id=source["id"],
+                            normalized_value=business_value,
+                            normalized_value_hash=value_hash,
+                            valid_from=observed_at,
+                            supersedes_fact_id=(
+                                int(latest_fact["id"]) if latest_fact else None
+                            ),
+                        )
+                    _, observation_created = (
+                        self._persistence.fact_observations.create_idempotent(
+                            session,
+                            competitor_id=competitor["id"],
+                            run_id=run_id,
+                            fact_id=fact_id,
+                            source_id=source["id"],
+                            snapshot_id=snapshot["id"],
+                            evidence_text=normalized.evidence_text,
+                            confidence=normalized.confidence,
+                            observed_at=observed_at,
+                        )
+                    )
+                    if not observation_created:
+                        duplicate_count += 1
+                        continue
+                run_seen_keys.add(identity)
                 seen_keys.add(normalized.fact_key or "")
                 existing_keys.add(normalized.fact_key or "")
                 confirmed_for_page += 1
@@ -306,6 +392,15 @@ class FactExtractionService:
         if owns_run:
             assert stage_id is not None
             with self._persistence.transaction() as session:
+                for fact in self._persistence.fact_observations.list_for_run(
+                    session, run_id
+                ):
+                    self._persistence.fact_versions.activate(
+                        session, fact["id"], "BASELINE"
+                    )
+                    self._persistence.fact_observations.update_status(
+                        session, run_id, fact["id"], "BASELINE"
+                    )
                 self._persistence.stage_events.finish(
                     session, stage_id, status="SUCCEEDED"
                 )
@@ -315,7 +410,8 @@ class FactExtractionService:
         return FactExtractionResult(
             competitor_name, competitor["id"], run_id, self._provider.name,
             tuple(source_ids), tuple(snapshot_ids), candidate_count, tuple(saved),
-            tuple(rejected), duplicate_count, tuple(warnings), tuple(errors),
+            tuple(rejected), duplicate_count, historical_reuse_count,
+            tuple(warnings), tuple(errors),
         )
 
     def _finish_tool(

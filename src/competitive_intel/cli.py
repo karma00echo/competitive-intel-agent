@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
+from pathlib import Path
 from typing import Sequence
 
 from competitive_intel.config import Settings
@@ -21,6 +22,7 @@ from competitive_intel.services import (
     FactExtractionService,
     SnapshotService,
     SourceDiscoveryService,
+    CompetitorReportService,
 )
 
 
@@ -45,6 +47,32 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--locale", default="en-US")
     analyze.add_argument("--verbose", action="store_true")
     analyze.add_argument("--max-tool-calls", type=int, default=12)
+    analyze.add_argument(
+        "--fixture-scenario",
+        choices=(
+            "unchanged",
+            "price_changed",
+            "feature_added",
+            "feature_removed",
+            "page_failure",
+        ),
+        default="unchanged",
+    )
+    report = subparsers.add_parser("report")
+    report_commands = report.add_subparsers(
+        dest="report_command", required=True
+    )
+    show = report_commands.add_parser("show")
+    show.add_argument("--report-id", type=int)
+    show.add_argument("--run-id", type=int)
+    show.add_argument("--competitor")
+    show.add_argument("--latest", action="store_true")
+    export = report_commands.add_parser("export")
+    export.add_argument("--run-id", type=int, required=True)
+    export.add_argument(
+        "--format", choices=("markdown", "json"), required=True
+    )
+    export.add_argument("--output", required=True)
     return parser
 
 
@@ -66,11 +94,25 @@ def exit_code_for_state(state: AgentState) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
-        if args.max_tool_calls < 1:
+        if args.command == "analyze" and args.max_tool_calls < 1:
             raise CLIArgumentError("--max-tool-calls must be at least 1.")
-        _fixture_only(args.fact_provider, "fact")
-        _fixture_only(args.agent_provider, "agent")
-        search_provider = create_search_provider(args.search_provider)
+        if args.command == "analyze":
+            _fixture_only(args.fact_provider, "fact")
+            _fixture_only(args.agent_provider, "agent")
+            search_provider = create_search_provider(args.search_provider)
+        elif args.report_command == "show":
+            selectors = sum(
+                (
+                    args.report_id is not None,
+                    args.run_id is not None,
+                    bool(args.competitor and args.latest),
+                )
+            )
+            if selectors != 1:
+                raise CLIArgumentError(
+                    "report show requires exactly one of --report-id, "
+                    "--run-id, or --competitor with --latest."
+                )
     except (CLIArgumentError, ValueError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 64
@@ -79,18 +121,80 @@ def main(argv: Sequence[str] | None = None) -> int:
     database = Database(settings.database)
     persistence = Persistence(database)
 
+    if args.command == "report":
+        try:
+            reports = CompetitorReportService(persistence)
+            report = reports.get(
+                report_id=getattr(args, "report_id", None),
+                run_id=args.run_id,
+                competitor_name=getattr(args, "competitor", None),
+                latest=getattr(args, "latest", False),
+            )
+            if report is None:
+                print("Report not found.", file=sys.stderr)
+                return 1
+            if args.report_command == "show":
+                print(
+                    json.dumps(
+                        {
+                            "report_id": report.report_id,
+                            "report_type": report.report_type,
+                            "title": report.title,
+                            "executive_summary": report.executive_summary,
+                            "change_summary": report.change_summary,
+                            "content_json": report.content_json,
+                            "content_markdown": report.content_markdown,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+                )
+            else:
+                output = Path(args.output).resolve()
+                output.parent.mkdir(parents=True, exist_ok=True)
+                content = (
+                    report.content_markdown
+                    if args.format == "markdown"
+                    else json.dumps(
+                        report.content_json,
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+                    + "\n"
+                )
+                output.write_text(content, encoding="utf-8")
+                print(
+                    json.dumps(
+                        {
+                            "report_id": report.report_id,
+                            "format": args.format,
+                            "output": str(output),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            return 0
+        except (OSError, ValueError) as exc:
+            print(f"Report command failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            database.dispose()
+
     def emit(event: dict) -> None:
         if args.verbose:
             print(json.dumps(event, ensure_ascii=False, default=str))
 
     try:
-        fetcher = FixturePageFetcher()
+        fetcher = FixturePageFetcher(scenario=args.fixture_scenario)
         source_service = SourceDiscoveryService(
             persistence, search_provider, fetcher
         )
         snapshot_service = SnapshotService(persistence, fetcher)
         fact_service = FactExtractionService(
-            persistence, FixtureFactExtractionProvider()
+            persistence,
+            FixtureFactExtractionProvider(scenario=args.fixture_scenario),
         )
         tools = AgentToolExecutor(
             persistence, source_service, snapshot_service, fact_service
@@ -126,6 +230,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "errors": result.errors,
         }
     )
+    if payload.get("report_id") is not None:
+        payload["report_view_command"] = (
+            f'"{sys.executable}" -m competitive_intel.cli report show '
+            f"--report-id {payload['report_id']}"
+        )
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     return exit_code_for_state(result.final_state)
 

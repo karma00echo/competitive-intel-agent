@@ -16,10 +16,10 @@ The repository currently contains:
   persistence;
 - phase five: a controlled single-Agent Runner, native tool-calling provider
   abstraction, deterministic state machine, bounded Agent tools, run audit,
-  structured run summaries, and a unified CLI.
-
-Fact-level history comparison and formal baseline/change reports are not
-implemented yet.
+  structured run summaries, and a unified CLI;
+- phase six: deterministic fact normalization and history comparison,
+  cross-run fact-version reuse, persisted change records, formal baseline and
+  change-tracking reports, and report viewing/export.
 
 ## Requirements
 
@@ -53,7 +53,8 @@ If it cannot, create `competitive_intel` in Navicat with `utf8mb4`, then run:
 python scripts/init_database.py --database-exists
 ```
 
-The command is idempotent and executes `migrations/001_initial_schema.sql`.
+The command is idempotent and executes unapplied SQL files in `migrations/`
+in filename order. Applied versions are recorded in `schema_migrations`.
 
 ## Phase-three source discovery
 
@@ -188,8 +189,8 @@ final state.
 `BASELINE` is selected when the competitor is absent or lacks any part of a
 complete profile: VERIFIED source, successful snapshot, or confirmed fact.
 `REFRESH` requires all three and skips source discovery. REFRESH creates new
-snapshots and extracts facts only from successful snapshots in the current
-run; it does not compare fact history yet.
+snapshots, extracts facts only from successful snapshots in the current run,
+and then executes deterministic fact comparison and reporting.
 
 The logical state paths are:
 
@@ -197,12 +198,14 @@ The logical state paths are:
 BASELINE:
 INITIALIZING -> PROFILE_LOOKUP -> MODE_SELECTION -> SOURCE_DISCOVERY
 -> SOURCE_VALIDATION -> PAGE_FETCHING -> SNAPSHOT_PERSISTENCE
--> FACT_EXTRACTION -> FACT_PERSISTENCE -> RUN_SUMMARY -> terminal
+-> FACT_EXTRACTION -> FACT_PERSISTENCE -> REPORT_GENERATION
+-> REPORT_PERSISTENCE -> RUN_SUMMARY -> terminal
 
 REFRESH:
 INITIALIZING -> PROFILE_LOOKUP -> MODE_SELECTION -> PAGE_FETCHING
 -> SNAPSHOT_PERSISTENCE -> FACT_EXTRACTION -> FACT_PERSISTENCE
--> RUN_SUMMARY -> terminal
+-> HISTORY_LOOKUP -> FACT_COMPARISON -> CHANGE_PERSISTENCE
+-> REPORT_GENERATION -> REPORT_PERSISTENCE -> RUN_SUMMARY -> terminal
 ```
 
 Terminal states are `COMPLETED`, `COMPLETED_WITH_WARNINGS`, and `FAILED`.
@@ -224,6 +227,10 @@ The registered Agent tools are:
 - `discover_competitor_sources`
 - `refresh_verified_sources`
 - `extract_competitor_facts`
+- `get_previous_fact_baseline`
+- `compare_competitor_facts`
+- `generate_competitor_report`
+- `get_competitor_report`
 - `get_run_status`
 - `finalize_run_summary`
 
@@ -258,15 +265,106 @@ page content or credentials. Exit codes are:
 | `1` | `FAILED` |
 | `64` | Invalid input or provider/configuration |
 
-The structured summary is not a formal competitor report. Its counts come
-from current-run tool results and persisted sources, snapshots, facts, and
-audit rows.
+The structured summary includes the persisted formal report ID/type and
+deterministic fact-change counts.
 
 To add a real tool-calling model, implement `AgentProvider` and register it in
 a future provider factory. Configuration is reserved as `AGENT_PROVIDER`,
 `AGENT_API_KEY`, `AGENT_MODEL`, and `AGENT_ENDPOINT`. The adapter must honor
 the supplied allowlist and strict tool schemas; missing real-model
 configuration does not affect fixture imports or tests.
+
+## Phase-six fact history and reports
+
+Fact identity is `(competitor_id, fact_category, fact_key)`. `fact_key` is the
+primary semantic identity; normalized business values decide whether that
+identity is unchanged or modified. Evidence text, confidence, source,
+snapshot, and collection time remain auditable metadata and do not by
+themselves produce `MODIFIED`.
+
+`FactNormalizer` applies category-specific rules:
+
+- `PRICE`: decimal formatting is canonical, currency and billing enums are
+  uppercase, and `null` remains distinct from `UNKNOWN`;
+- `FEATURE`: names and whitespace are normalized; status, availability, and
+  related plans remain business fields;
+- `PLAN`: plan names and public status are normalized, and included-feature
+  arrays are sorted before comparison;
+- `POSITIONING`: whitespace is normalized and list-like sets are sorted;
+- `PRODUCT_UPDATE`: date, title, and update type remain part of stable
+  identity/value semantics, so recrawling the same update is unchanged.
+
+The additive migration `002_fact_history.sql` creates `fact_versions` and
+`fact_observations` without altering phase-one tables. Existing facts are
+backfilled. `product_facts` stores distinct business versions;
+`fact_observations` links each run to the version it observed. Therefore an
+unchanged refresh reuses the previous `fact_id` without growing
+`product_facts`, while retaining current-run evidence. Modified facts create a
+new version with `supersedes_fact_id`; old values remain queryable.
+
+The five core comparison states are:
+
+| State | Rule |
+|---|---|
+| `ADDED` | Identity absent from the previous valid baseline, present now |
+| `MODIFIED` | Same identity, different normalized business value |
+| `UNCHANGED` | Same identity and normalized business value |
+| `REMOVED` | Previously present, now absent, with a successful complete source fetch |
+| `UNCOMPARABLE` | Absence cannot be trusted because fetching or source coverage failed |
+
+A failed page is never `REMOVED`. `COMPLETED_WITH_WARNINGS` runs are valid
+comparison baselines because their physical persisted status is `COMPLETED`;
+individual failed-source facts remain protected by `UNCOMPARABLE`. Runs with
+physical status `FAILED` are never selected. Source coverage is conservative:
+the current source must have both a successful snapshot and at least one
+confirmed observation before absence can become `REMOVED`; otherwise it is
+`UNCOMPARABLE`.
+
+`changes` stores idempotent per-run comparison records with old/new fact IDs
+and values, evidence, confidence, and the deterministic reason. Because its
+original enum uses `UNKNOWN`, logical `UNCOMPARABLE` is stored physically as
+`UNKNOWN` and exposed as `UNCOMPARABLE` by services and reports.
+
+Reports are deterministic and use only persisted official sources, confirmed
+facts, and comparison records:
+
+- `BASELINE_REPORT` describes positioning, features, plans, prices, public
+  sales status, product updates, evidence coverage, and limitations;
+- `CHANGE_TRACKING_REPORT` describes added, removed, modified, unchanged, and
+  uncomparable facts, grouped change areas, evidence, risks, and run IDs.
+
+Possible-impact text is emitted only for confirmed changes, is explicitly
+labelled `INFERENCE`, and records the triggering `fact_key` and change type.
+It never becomes a confirmed product fact or an unsupported strategy
+recommendation.
+
+Both readable Markdown and structured JSON are stored in the existing
+`reports` table (`summary_json` contains title, JSON content, prompt/generator
+metadata, and counts).
+
+Use the project Python 3.12 interpreter for the offline fixture scenarios:
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --verbose
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --fixture-scenario unchanged
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --fixture-scenario price_changed
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --fixture-scenario feature_added
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --fixture-scenario feature_removed
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Notion --agent-provider fixture --fixture-scenario page_failure
+```
+
+View and export reports:
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report show --run-id 3
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report show --competitor Notion --latest
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report export --run-id 3 --format markdown --output reports/notion_run_3.md
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report export --run-id 3 --format json --output reports/notion_run_3.json
+```
+
+Fixture scenarios cover Notion and Feishu baselines/unchanged refreshes,
+Notion price modification, feature addition/removal, and a failed pricing page
+that produces `UNCOMPARABLE`.
 
 ## Phase-two page states
 
@@ -323,10 +421,10 @@ state, and tool-call results reproducible.
 
 ## Not implemented yet
 
-- fact-level history comparison
 - real Agent and fact-extraction model adapters
-- formal baseline and change-tracking reports
 - frontend, scheduling, Playwright, RAG, and vector databases
+- notifications and production search orchestration
+- PDF, Word, and PowerPoint report export
 - a real search-provider adapter; future configuration requires
   `SEARCH_PROVIDER`, `SEARCH_API_KEY`, and `SEARCH_ENDPOINT`
 - a real model fact-extraction adapter; future configuration requires

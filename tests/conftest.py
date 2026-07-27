@@ -24,6 +24,8 @@ DELETE_ORDER = (
     "stage_events",
     "reports",
     "changes",
+    "fact_observations",
+    "fact_versions",
     "product_facts",
     "snapshots",
     "sources",

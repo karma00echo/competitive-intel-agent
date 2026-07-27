@@ -70,7 +70,7 @@ def test_notion_complete_offline_baseline_and_audit(persistence) -> None:
 
     assert result.run_mode == RunMode.BASELINE
     assert result.final_state == AgentState.COMPLETED
-    assert result.tool_call_count == 5
+    assert result.tool_call_count == 6
     assert result.summary is not None
     assert result.summary.verified_source_count == 4
     assert result.summary.baseline_page_count == 4
@@ -88,8 +88,8 @@ def test_notion_complete_offline_baseline_and_audit(persistence) -> None:
         calls = persistence.tool_calls.list_for_run(session, result.run_id)
     assert run["run_mode"] == "BASELINE"
     assert run["status"] == "COMPLETED"
-    assert run["tool_call_count"] == 5
-    assert len(calls) == 5
+    assert run["tool_call_count"] == 6
+    assert len(calls) == 6
     assert all(call["status"] == "SUCCEEDED" for call in calls)
     details = " ".join(str(stage["details_json"]) for stage in stages)
     assert AGENT_PROMPT_VERSION in details
@@ -278,6 +278,9 @@ class FailingToolWrapper:
                 )
         return self.base.execute(name, arguments, context)
 
+    def establish_baseline(self, context):
+        return self.base.establish_baseline(context)
+
 
 def test_retryable_tool_error_retries_once_and_completes(persistence) -> None:
     base_runner, provider = _build_runner(persistence)
@@ -290,7 +293,7 @@ def test_retryable_tool_error_retries_once_and_completes(persistence) -> None:
     )
     result = runner.run("Notion")
     assert result.final_state == AgentState.COMPLETED
-    assert result.tool_call_count == 6
+    assert result.tool_call_count == 7
     assert wrapped.profile_calls == 2
 
 

@@ -328,6 +328,29 @@ class AgentRunRepository:
             {"competitor_id": competitor_id},
         )
 
+    def get_previous_successful_with_facts(
+        self, session: Session, competitor_id: int, before_run_id: int
+    ) -> Record | None:
+        """Warnings are persisted as COMPLETED and are valid comparison baselines."""
+        return _one(
+            session,
+            """
+            SELECT ar.* FROM agent_runs ar
+            WHERE ar.competitor_id = :competitor_id
+              AND ar.id < :before_run_id
+              AND ar.status = 'COMPLETED'
+              AND EXISTS (
+                  SELECT 1 FROM fact_observations fo WHERE fo.run_id = ar.id
+              )
+            ORDER BY ar.id DESC
+            LIMIT 1
+            """,
+            {
+                "competitor_id": competitor_id,
+                "before_run_id": before_run_id,
+            },
+        )
+
     def finish(
         self,
         session: Session,
@@ -501,10 +524,29 @@ class ProductFactRepository:
         )
 
     def list_for_run(self, session: Session, run_id: int) -> list[Record]:
+        observations = _all(
+            session,
+            """
+            SELECT pf.* FROM fact_observations fo
+            JOIN product_facts pf ON pf.id = fo.fact_id
+            WHERE fo.run_id = :run_id
+            ORDER BY pf.id
+            """,
+            {"run_id": run_id},
+        )
+        if observations:
+            return observations
         return _all(
             session,
             "SELECT * FROM product_facts WHERE run_id = :run_id ORDER BY id",
             {"run_id": run_id},
+        )
+
+    def get(self, session: Session, fact_id: int) -> Record | None:
+        return _one(
+            session,
+            "SELECT * FROM product_facts WHERE id = :id",
+            {"id": fact_id},
         )
 
     def list_for_snapshot(
@@ -582,11 +624,59 @@ class ChangeRepository:
             },
         )
 
+    def create_idempotent(
+        self,
+        session: Session,
+        **values: Any,
+    ) -> int:
+        existing = _one(
+            session,
+            """
+            SELECT id FROM changes
+            WHERE run_id = :run_id
+              AND fact_key = :fact_key
+              AND change_type = :change_type
+            LIMIT 1
+            """,
+            {
+                "run_id": values["run_id"],
+                "fact_key": values["fact_key"],
+                "change_type": values["change_type"],
+            },
+        )
+        return int(existing["id"]) if existing else self.create(session, **values)
+
     def list_for_run(self, session: Session, run_id: int) -> list[Record]:
         return _all(
             session,
             "SELECT * FROM changes WHERE run_id = :run_id ORDER BY id",
             {"run_id": run_id},
+        )
+
+    def list_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT * FROM changes
+            WHERE competitor_id = :competitor_id
+            ORDER BY created_at DESC, id DESC
+            """,
+            {"competitor_id": competitor_id},
+        )
+
+    def list_for_fact_key(
+        self, session: Session, competitor_id: int, fact_key: str
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT * FROM changes
+            WHERE competitor_id = :competitor_id AND fact_key = :fact_key
+            ORDER BY created_at, id
+            """,
+            {"competitor_id": competitor_id, "fact_key": fact_key},
         )
 
 
@@ -630,6 +720,279 @@ class ReportRepository:
             WHERE run_id = :run_id AND report_type = :report_type
             """,
             {"run_id": run_id, "report_type": report_type},
+        )
+
+    def get(self, session: Session, report_id: int) -> Record | None:
+        return _one(
+            session,
+            "SELECT * FROM reports WHERE id = :id",
+            {"id": report_id},
+        )
+
+    def get_latest_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT * FROM reports
+            WHERE competitor_id = :competitor_id AND status = 'GENERATED'
+            ORDER BY generated_at DESC, id DESC
+            LIMIT 1
+            """,
+            {"competitor_id": competitor_id},
+        )
+
+
+class FactVersionRepository:
+    def create(
+        self,
+        session: Session,
+        *,
+        fact_id: int,
+        competitor_id: int,
+        source_id: int,
+        normalized_value: Any,
+        normalized_value_hash: str,
+        valid_from: datetime,
+        supersedes_fact_id: int | None = None,
+        is_current: bool = False,
+        comparison_status: str = "PENDING",
+    ) -> None:
+        session.execute(
+            text(
+                """
+                INSERT INTO fact_versions
+                    (fact_id, competitor_id, source_id, normalized_value,
+                     normalized_value_hash, valid_from, supersedes_fact_id,
+                     is_current, comparison_status)
+                VALUES
+                    (:fact_id, :competitor_id, :source_id, :normalized_value,
+                     :normalized_value_hash, :valid_from, :supersedes_fact_id,
+                     :is_current, :comparison_status)
+                """
+            ),
+            {
+                **locals(),
+                "normalized_value": _json(normalized_value),
+            },
+        )
+
+    def get(self, session: Session, fact_id: int) -> Record | None:
+        return _one(
+            session,
+            "SELECT * FROM fact_versions WHERE fact_id = :fact_id",
+            {"fact_id": fact_id},
+        )
+
+    def find_current(
+        self,
+        session: Session,
+        competitor_id: int,
+        category: str,
+        fact_key: str,
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT pf.*, fv.source_id, fv.normalized_value,
+                   fv.normalized_value_hash, fv.valid_from, fv.valid_to,
+                   fv.is_current, fv.supersedes_fact_id, fv.comparison_status
+            FROM fact_versions fv
+            JOIN product_facts pf ON pf.id = fv.fact_id
+            WHERE fv.competitor_id = :competitor_id
+              AND pf.fact_category = :category
+              AND pf.fact_key = :fact_key
+              AND fv.is_current = TRUE
+            ORDER BY fv.valid_from DESC, fv.fact_id DESC
+            LIMIT 1
+            """,
+            {
+                "competitor_id": competitor_id,
+                "category": category,
+                "fact_key": fact_key,
+            },
+        )
+
+    def find_latest(
+        self,
+        session: Session,
+        competitor_id: int,
+        category: str,
+        fact_key: str,
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT pf.*, fv.source_id, fv.normalized_value,
+                   fv.normalized_value_hash, fv.valid_from, fv.valid_to,
+                   fv.is_current, fv.supersedes_fact_id, fv.comparison_status
+            FROM fact_versions fv
+            JOIN product_facts pf ON pf.id = fv.fact_id
+            WHERE fv.competitor_id = :competitor_id
+              AND pf.fact_category = :category
+              AND pf.fact_key = :fact_key
+            ORDER BY fv.valid_from DESC, fv.fact_id DESC
+            LIMIT 1
+            """,
+            {
+                "competitor_id": competitor_id,
+                "category": category,
+                "fact_key": fact_key,
+            },
+        )
+
+    def list_current(
+        self, session: Session, competitor_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT pf.*, fv.source_id, fv.normalized_value,
+                   fv.normalized_value_hash, fv.valid_from, fv.valid_to,
+                   fv.is_current, fv.supersedes_fact_id, fv.comparison_status
+            FROM fact_versions fv
+            JOIN product_facts pf ON pf.id = fv.fact_id
+            WHERE fv.competitor_id = :competitor_id
+              AND fv.is_current = TRUE
+            ORDER BY pf.fact_category, pf.fact_key
+            """,
+            {"competitor_id": competitor_id},
+        )
+
+    def activate(
+        self, session: Session, fact_id: int, status: str
+    ) -> None:
+        session.execute(
+            text(
+                """
+                UPDATE fact_versions
+                SET is_current = TRUE, valid_to = NULL,
+                    comparison_status = :status
+                WHERE fact_id = :fact_id
+                """
+            ),
+            {"fact_id": fact_id, "status": status},
+        )
+
+    def close(
+        self, session: Session, fact_id: int, valid_to: datetime, status: str
+    ) -> None:
+        session.execute(
+            text(
+                """
+                UPDATE fact_versions
+                SET is_current = FALSE, valid_to = :valid_to,
+                    comparison_status = :status
+                WHERE fact_id = :fact_id
+                """
+            ),
+            {"fact_id": fact_id, "valid_to": valid_to, "status": status},
+        )
+
+    def list_history(
+        self, session: Session, competitor_id: int, fact_key: str
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT pf.*, fv.source_id, fv.normalized_value,
+                   fv.valid_from, fv.valid_to, fv.is_current,
+                   fv.supersedes_fact_id, fv.comparison_status
+            FROM fact_versions fv
+            JOIN product_facts pf ON pf.id = fv.fact_id
+            WHERE fv.competitor_id = :competitor_id
+              AND pf.fact_key = :fact_key
+            ORDER BY fv.valid_from, fv.fact_id
+            """,
+            {"competitor_id": competitor_id, "fact_key": fact_key},
+        )
+
+
+class FactObservationRepository:
+    def create_idempotent(
+        self,
+        session: Session,
+        *,
+        competitor_id: int,
+        run_id: int,
+        fact_id: int,
+        source_id: int,
+        snapshot_id: int,
+        evidence_text: str,
+        confidence: Decimal | float,
+        observed_at: datetime,
+        comparison_status: str = "PENDING",
+    ) -> tuple[int, bool]:
+        existing = _one(
+            session,
+            """
+            SELECT id FROM fact_observations
+            WHERE run_id = :run_id AND fact_id = :fact_id
+            """,
+            {"run_id": run_id, "fact_id": fact_id},
+        )
+        if existing:
+            return int(existing["id"]), False
+        observation_id = _insert(
+            session,
+            """
+            INSERT INTO fact_observations
+                (competitor_id, run_id, fact_id, source_id, snapshot_id,
+                 evidence_text, confidence, observed_at, comparison_status)
+            VALUES
+                (:competitor_id, :run_id, :fact_id, :source_id, :snapshot_id,
+                 :evidence_text, :confidence, :observed_at, :comparison_status)
+            """,
+            locals(),
+        )
+        return observation_id, True
+
+    def list_for_run(self, session: Session, run_id: int) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT pf.*, fo.id AS observation_id, fo.run_id AS observed_run_id,
+                   fo.source_id, fo.snapshot_id AS observed_snapshot_id,
+                   fo.evidence_text AS observed_evidence,
+                   fo.confidence AS observed_confidence, fo.observed_at,
+                   fo.comparison_status, fv.normalized_value,
+                   fv.normalized_value_hash, fv.is_current,
+                   src.url AS observed_source_url
+            FROM fact_observations fo
+            JOIN product_facts pf ON pf.id = fo.fact_id
+            JOIN fact_versions fv ON fv.fact_id = fo.fact_id
+            JOIN sources src ON src.id = fo.source_id
+            WHERE fo.run_id = :run_id
+            ORDER BY pf.fact_category, pf.fact_key
+            """,
+            {"run_id": run_id},
+        )
+
+    def update_status(
+        self, session: Session, run_id: int, fact_id: int, status: str
+    ) -> None:
+        session.execute(
+            text(
+                """
+                UPDATE fact_observations SET comparison_status = :status
+                WHERE run_id = :run_id AND fact_id = :fact_id
+                """
+            ),
+            {"run_id": run_id, "fact_id": fact_id, "status": status},
+        )
+
+    def list_history(
+        self, session: Session, fact_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT * FROM fact_observations
+            WHERE fact_id = :fact_id
+            ORDER BY observed_at, id
+            """,
+            {"fact_id": fact_id},
         )
 
 
@@ -784,6 +1147,8 @@ class Persistence:
         self.agent_runs = AgentRunRepository()
         self.snapshots = SnapshotRepository()
         self.product_facts = ProductFactRepository()
+        self.fact_versions = FactVersionRepository()
+        self.fact_observations = FactObservationRepository()
         self.changes = ChangeRepository()
         self.reports = ReportRepository()
         self.stage_events = StageEventRepository()

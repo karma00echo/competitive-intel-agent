@@ -17,6 +17,11 @@ class AgentState(StrEnum):
     SNAPSHOT_PERSISTENCE = "SNAPSHOT_PERSISTENCE"
     FACT_EXTRACTION = "FACT_EXTRACTION"
     FACT_PERSISTENCE = "FACT_PERSISTENCE"
+    HISTORY_LOOKUP = "HISTORY_LOOKUP"
+    FACT_COMPARISON = "FACT_COMPARISON"
+    CHANGE_PERSISTENCE = "CHANGE_PERSISTENCE"
+    REPORT_GENERATION = "REPORT_GENERATION"
+    REPORT_PERSISTENCE = "REPORT_PERSISTENCE"
     RUN_SUMMARY = "RUN_SUMMARY"
     COMPLETED = "COMPLETED"
     COMPLETED_WITH_WARNINGS = "COMPLETED_WITH_WARNINGS"
@@ -65,6 +70,25 @@ ALLOWED_TRANSITIONS: dict[AgentState, frozenset[AgentState]] = {
         {AgentState.FACT_PERSISTENCE, AgentState.FAILED}
     ),
     AgentState.FACT_PERSISTENCE: frozenset(
+        {
+            AgentState.HISTORY_LOOKUP,
+            AgentState.REPORT_GENERATION,
+            AgentState.FAILED,
+        }
+    ),
+    AgentState.HISTORY_LOOKUP: frozenset(
+        {AgentState.FACT_COMPARISON, AgentState.FAILED}
+    ),
+    AgentState.FACT_COMPARISON: frozenset(
+        {AgentState.CHANGE_PERSISTENCE, AgentState.FAILED}
+    ),
+    AgentState.CHANGE_PERSISTENCE: frozenset(
+        {AgentState.REPORT_GENERATION, AgentState.FAILED}
+    ),
+    AgentState.REPORT_GENERATION: frozenset(
+        {AgentState.REPORT_PERSISTENCE, AgentState.FAILED}
+    ),
+    AgentState.REPORT_PERSISTENCE: frozenset(
         {AgentState.RUN_SUMMARY, AgentState.FAILED}
     ),
     AgentState.RUN_SUMMARY: frozenset(
@@ -120,6 +144,14 @@ class AgentRunSummary:
     tool_call_count: int
     warnings: tuple[str, ...]
     errors: tuple[str, ...]
+    report_id: int | None = None
+    report_type: str | None = None
+    added_count: int = 0
+    removed_count: int = 0
+    modified_count: int = 0
+    unchanged_count: int = 0
+    uncomparable_count: int = 0
+    historical_reuse_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +189,7 @@ class ControlledRunContext:
     tool_results: dict[str, ToolResult] = field(default_factory=dict)
     transitions: list[tuple[AgentState, AgentState]] = field(default_factory=list)
     summary: AgentRunSummary | None = None
+    previous_successful_run_id: int | None = None
     tool_call_count: int = 0
     persisted_stage_attempts: dict[str, int] = field(default_factory=dict)
 

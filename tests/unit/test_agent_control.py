@@ -40,7 +40,7 @@ def _request(state: AgentState) -> AgentProviderRequest:
 
 
 def test_versioned_prompt_contains_required_safety_rules() -> None:
-    assert AGENT_PROMPT_VERSION == "controlled-agent-v1"
+    assert AGENT_PROMPT_VERSION == "controlled-agent-v2"
     for phrase in (
         "not a general chat assistant",
         "Never invent tool results",
@@ -69,6 +69,9 @@ def test_legal_and_illegal_state_transitions() -> None:
         (AgentState.SOURCE_DISCOVERY, "discover_competitor_sources"),
         (AgentState.PAGE_FETCHING, "refresh_verified_sources"),
         (AgentState.FACT_EXTRACTION, "extract_competitor_facts"),
+        (AgentState.HISTORY_LOOKUP, "get_previous_fact_baseline"),
+        (AgentState.FACT_COMPARISON, "compare_competitor_facts"),
+        (AgentState.REPORT_GENERATION, "generate_competitor_report"),
         (AgentState.RUN_SUMMARY, "finalize_run_summary"),
     ],
 )
@@ -92,6 +95,12 @@ def test_tool_whitelists_are_state_specific() -> None:
         AgentState.PAGE_FETCHING
     )
     assert "get_run_status" in tools.allowed_tools(AgentState.FACT_EXTRACTION)
+    assert "compare_competitor_facts" in tools.allowed_tools(
+        AgentState.FACT_COMPARISON
+    )
+    assert "compare_competitor_facts" not in tools.allowed_tools(
+        AgentState.REPORT_GENERATION
+    )
 
 
 def test_strict_tool_argument_schema_rejects_missing_unknown_and_wrong_type() -> None:

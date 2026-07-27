@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "agent_runs",
     "stage_events",
     "tool_calls",
+    "schema_migrations",
+    "fact_versions",
+    "fact_observations",
 }
 
 
@@ -39,15 +42,27 @@ def test_key_unique_and_foreign_key_constraints(mysql_engine: Engine) -> None:
     snapshot_unique = {
         item["name"] for item in inspector.get_unique_constraints("snapshots")
     }
+    observation_unique = {
+        item["name"]
+        for item in inspector.get_unique_constraints("fact_observations")
+    }
     assert "uq_competitors_normalized_name" in competitor_unique
     assert "uq_sources_competitor_url" in source_unique
     assert "uq_snapshots_source_run" in snapshot_unique
+    assert "uq_fact_observations_run_fact" in observation_unique
 
     source_foreign_keys = {
         item["name"]: item for item in inspector.get_foreign_keys("sources")
     }
     assert source_foreign_keys["fk_sources_competitor"]["referred_table"] == (
         "competitors"
+    )
+    version_foreign_keys = {
+        item["name"]: item
+        for item in inspector.get_foreign_keys("fact_versions")
+    }
+    assert version_foreign_keys["fk_fact_versions_fact"]["referred_table"] == (
+        "product_facts"
     )
 
 

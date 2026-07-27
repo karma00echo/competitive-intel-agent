@@ -156,5 +156,6 @@ class FactExtractionResult:
     saved: tuple[SavedFact, ...]
     rejected: tuple[RejectedFact, ...]
     duplicate_count: int
+    historical_reuse_count: int
     warnings: tuple[str, ...]
     errors: tuple[str, ...]
