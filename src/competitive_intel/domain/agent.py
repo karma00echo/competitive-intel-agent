@@ -152,6 +152,12 @@ class AgentRunSummary:
     unchanged_count: int = 0
     uncomparable_count: int = 0
     historical_reuse_count: int = 0
+    search_provider: str = "fixture"
+    fetch_mode: str = "fixture"
+    agent_provider: str = "fixture"
+    fact_provider: str = "fixture"
+    fact_extraction_status: str = "COMPLETED"
+    fact_extraction_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

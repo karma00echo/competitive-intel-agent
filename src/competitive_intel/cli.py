@@ -14,6 +14,7 @@ from competitive_intel.domain.agent import AgentRunnerLimits, AgentState
 from competitive_intel.infrastructure.agent import FixtureAgentProvider
 from competitive_intel.infrastructure.facts import FixtureFactExtractionProvider
 from competitive_intel.infrastructure.http.fixture_fetcher import FixturePageFetcher
+from competitive_intel.infrastructure.http.requests_fetcher import RequestsFetcher
 from competitive_intel.infrastructure.search.factory import create_search_provider
 from competitive_intel.persistence import Database, Persistence
 from competitive_intel.services import (
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--locale", default="en-US")
     analyze.add_argument("--verbose", action="store_true")
     analyze.add_argument("--max-tool-calls", type=int, default=12)
+    analyze.add_argument("--skip-fact-extraction", action="store_true")
     analyze.add_argument(
         "--fixture-scenario",
         choices=(
@@ -94,12 +96,17 @@ def exit_code_for_state(state: AgentState) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
+        settings = Settings.from_env()
         if args.command == "analyze" and args.max_tool_calls < 1:
             raise CLIArgumentError("--max-tool-calls must be at least 1.")
         if args.command == "analyze":
             _fixture_only(args.fact_provider, "fact")
             _fixture_only(args.agent_provider, "agent")
-            search_provider = create_search_provider(args.search_provider)
+            search_provider = create_search_provider(
+                args.search_provider,
+                api_key=settings.search.api_key,
+                endpoint=settings.search.endpoint,
+            )
         elif args.report_command == "show":
             selectors = sum(
                 (
@@ -117,7 +124,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 64
 
-    settings = Settings.from_env()
     database = Database(settings.database)
     persistence = Persistence(database)
 
@@ -187,7 +193,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(event, ensure_ascii=False, default=str))
 
     try:
-        fetcher = FixturePageFetcher(scenario=args.fixture_scenario)
+        real_search = search_provider.name != "fixture"
+        skip_fact_extraction = (
+            args.skip_fact_extraction or real_search
+        )
+        fetcher = (
+            RequestsFetcher()
+            if real_search
+            else FixturePageFetcher(scenario=args.fixture_scenario)
+        )
         source_service = SourceDiscoveryService(
             persistence, search_provider, fetcher
         )
@@ -197,7 +211,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             FixtureFactExtractionProvider(scenario=args.fixture_scenario),
         )
         tools = AgentToolExecutor(
-            persistence, source_service, snapshot_service, fact_service
+            persistence,
+            source_service,
+            snapshot_service,
+            fact_service,
+            skip_fact_extraction=skip_fact_extraction,
+            search_provider=search_provider.name,
+            fetch_mode="real" if real_search else "fixture",
+            agent_provider="fixture",
+            fact_provider="fixture",
         )
         runner = AgentRunner(
             persistence,

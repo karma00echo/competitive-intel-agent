@@ -103,6 +103,15 @@ TOOL_DEFINITIONS = {
         ),
         frozenset({AgentState.FACT_EXTRACTION}),
     ),
+    "skip_fact_extraction": ToolDefinition(
+        "skip_fact_extraction",
+        "Skip extraction when real content has no real fact provider.",
+        _object_schema(
+            {"competitor_name": {"type": "string", "minLength": 1}},
+            ("competitor_name",),
+        ),
+        frozenset({AgentState.FACT_EXTRACTION}),
+    ),
     "get_previous_fact_baseline": ToolDefinition(
         "get_previous_fact_baseline",
         "Read the previous successful fact baseline for this competitor.",
@@ -201,6 +210,11 @@ class AgentToolExecutor:
         facts: FactExtractionService,
         history: FactHistoryService | None = None,
         reports: CompetitorReportService | None = None,
+        skip_fact_extraction: bool = False,
+        search_provider: str = "fixture",
+        fetch_mode: str = "fixture",
+        agent_provider: str = "fixture",
+        fact_provider: str = "fixture",
     ) -> None:
         self._persistence = persistence
         self._source_discovery = source_discovery
@@ -208,6 +222,13 @@ class AgentToolExecutor:
         self._facts = facts
         self._history = history or FactHistoryService(persistence)
         self._reports = reports or CompetitorReportService(persistence)
+        self._skip_fact_extraction = skip_fact_extraction
+        self._execution_metadata = {
+            "search_provider": search_provider,
+            "fetch_mode": fetch_mode,
+            "agent_provider": agent_provider,
+            "fact_provider": fact_provider,
+        }
         self._handlers: dict[
             str, Callable[[dict[str, Any], ControlledRunContext], ToolResult]
         ] = {
@@ -215,6 +236,7 @@ class AgentToolExecutor:
             "discover_competitor_sources": self._discover_sources,
             "refresh_verified_sources": self._refresh_sources,
             "extract_competitor_facts": self._extract_facts,
+            "skip_fact_extraction": self._skip_fact_extraction_tool,
             "get_previous_fact_baseline": self._get_previous_fact_baseline,
             "compare_competitor_facts": self._compare_competitor_facts,
             "generate_competitor_report": self._generate_competitor_report,
@@ -224,10 +246,18 @@ class AgentToolExecutor:
         }
 
     def allowed_tools(self, state: AgentState) -> tuple[str, ...]:
-        return tuple(
+        names = tuple(
             name for name, definition in TOOL_DEFINITIONS.items()
             if state in definition.states
         )
+        if state == AgentState.FACT_EXTRACTION:
+            blocked = (
+                "extract_competitor_facts"
+                if self._skip_fact_extraction
+                else "skip_fact_extraction"
+            )
+            names = tuple(name for name in names if name != blocked)
+        return names
 
     def schemas_for(self, names: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
         return tuple(TOOL_DEFINITIONS[name].provider_schema() for name in names)
@@ -318,6 +348,8 @@ class AgentToolExecutor:
             bool(verified),
             {
                 "competitor_id": competitor["id"] if competitor else None,
+                "search_provider": result.provider,
+                "search_result_count": len(result.candidates),
                 "official_domain": result.official_domain,
                 "verified_count": len(verified),
                 "verified_sources": [
@@ -330,6 +362,20 @@ class AgentToolExecutor:
                 ],
                 "pending_count": len(result.pending),
                 "rejected_count": len(result.rejected),
+                "domain_evidence": [
+                    {
+                        "registrable_domain": item.registrable_domain,
+                        "score": item.score,
+                        "supporting_result_count": item.supporting_result_count,
+                        "query_type_coverage": list(item.query_type_coverage),
+                        "brand_match_count": item.brand_match_count,
+                        "redirect_support": item.redirect_support,
+                        "page_metadata_support": item.page_metadata_support,
+                        "rejection_reasons": list(item.rejection_reasons),
+                        "supporting_urls": list(item.supporting_urls[:5]),
+                    }
+                    for item in result.domain_evidence[:8]
+                ],
                 "warnings": list(result.warnings[:20]),
                 "errors": list(result.errors[:20]),
             },
@@ -442,6 +488,32 @@ class AgentToolExecutor:
             error_code=None if result.saved else "NO_CONFIRMED_FACTS",
             error_message=None if result.saved else "No current facts passed evidence validation.",
             retryable=False,
+        )
+
+    def _skip_fact_extraction_tool(
+        self, arguments: dict[str, Any], context: ControlledRunContext
+    ) -> ToolResult:
+        del arguments, context
+        return ToolResult(
+            True,
+            {
+                "candidate_count": 0,
+                "confirmed_count": 0,
+                "rejected_count": 0,
+                "duplicate_count": 0,
+                "historical_reuse_count": 0,
+                "confirmed": [],
+                "rejected": [],
+                "fact_extraction_status": "SKIPPED",
+                "fact_extraction_reason": (
+                    "REAL_CONTENT_REQUIRES_REAL_FACT_PROVIDER"
+                ),
+                "warnings": [
+                    "Fact extraction skipped: real content requires a real "
+                    "fact provider."
+                ],
+                "errors": [],
+            },
         )
 
     def establish_baseline(self, context: ControlledRunContext) -> int:
@@ -623,7 +695,8 @@ class AgentToolExecutor:
             "refresh_verified_sources", ToolResult(True)
         ).data.get("pages", [])
         fact_data = context.tool_results.get(
-            "extract_competitor_facts", ToolResult(True)
+            "extract_competitor_facts",
+            context.tool_results.get("skip_fact_extraction", ToolResult(True)),
         ).data
         report_data = context.tool_results.get(
             "generate_competitor_report", ToolResult(True)
@@ -683,6 +756,14 @@ class AgentToolExecutor:
             historical_reuse_count=int(
                 fact_data.get("historical_reuse_count", 0)
             ),
+            search_provider=self._execution_metadata["search_provider"],
+            fetch_mode=self._execution_metadata["fetch_mode"],
+            agent_provider=self._execution_metadata["agent_provider"],
+            fact_provider=self._execution_metadata["fact_provider"],
+            fact_extraction_status=str(
+                fact_data.get("fact_extraction_status", "COMPLETED")
+            ),
+            fact_extraction_reason=fact_data.get("fact_extraction_reason"),
         )
         context.summary = summary
         return ToolResult(True, {"summary": asdict(summary)})

@@ -24,7 +24,9 @@ REJECTED_DOMAINS = {
     "twitter.com", "x.com", "youtube.com", "apps.apple.com",
     "play.google.com", "softonic.com", "cnet.com", "techcrunch.com",
     "crunchbase.com", "g2.com", "getapp.com", "googleadservices.com",
-    "baike.baidu.com",
+    "baike.baidu.com", "instagram.com", "tiktok.com", "reddit.com",
+    "medium.com", "glassdoor.com", "indeed.com", "lever.co",
+    "greenhouse.io", "bit.ly", "t.co", "tinyurl.com",
 }
 
 

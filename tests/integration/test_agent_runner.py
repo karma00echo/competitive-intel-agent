@@ -350,6 +350,57 @@ def test_critical_official_source_failure_is_failed(persistence) -> None:
     assert "VERIFIED official source" in result.errors[-1]
 
 
+class FactProviderMustNotRun:
+    name = "fixture"
+
+    def extract(self, request):
+        raise AssertionError("fixture facts must not run for real content")
+
+
+def test_real_content_mode_skips_fixture_fact_extraction(persistence) -> None:
+    fetcher = FixturePageFetcher()
+    source = SourceDiscoveryService(
+        persistence, FixtureSearchProvider(), fetcher
+    )
+    snapshots = SnapshotService(persistence, fetcher)
+    facts = FactExtractionService(persistence, FactProviderMustNotRun())
+    tools = AgentToolExecutor(
+        persistence,
+        source,
+        snapshots,
+        facts,
+        skip_fact_extraction=True,
+        search_provider="serper",
+        fetch_mode="real",
+        agent_provider="fixture",
+        fact_provider="fixture",
+    )
+    result = AgentRunner(
+        persistence, FixtureAgentProvider(), tools
+    ).run("Notion")
+    assert result.final_state == AgentState.COMPLETED_WITH_WARNINGS
+    assert result.summary is not None
+    assert result.summary.confirmed_fact_count == 0
+    assert result.summary.fact_extraction_status == "SKIPPED"
+    assert result.summary.fact_extraction_reason == (
+        "REAL_CONTENT_REQUIRES_REAL_FACT_PROVIDER"
+    )
+    assert result.summary.search_provider == "serper"
+    assert result.summary.fetch_mode == "real"
+    with persistence.transaction() as session:
+        facts_for_run = persistence.product_facts.list_for_run(
+            session, result.run_id
+        )
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+    assert facts_for_run == []
+    assert "skip_fact_extraction" in {
+        item["tool_name"] for item in calls
+    }
+    assert "extract_competitor_facts" not in {
+        item["tool_name"] for item in calls
+    }
+
+
 def test_cli_exit_code_contract_and_configuration_error(capsys) -> None:
     assert exit_code_for_state(AgentState.COMPLETED) == 0
     assert exit_code_for_state(AgentState.COMPLETED_WITH_WARNINGS) == 2

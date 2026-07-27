@@ -23,7 +23,7 @@ def test_service_discovers_and_saves_verified_notion_sources(persistence) -> Non
 
     result = service.discover("Notion")
 
-    assert result.official_domain == "www.notion.so"
+    assert result.official_domain == "notion.so"
     assert len(result.saved_source_ids) == 4
     assert {item.source_type for item in result.discoveries} == set(SourceType)
     assert all(
@@ -58,7 +58,7 @@ def test_feishu_missing_pricing_and_changelog_remain_not_found(persistence) -> N
     ).discover("飞书", language="zh", locale="zh-CN")
 
     by_type = {item.source_type: item for item in result.discoveries}
-    assert result.official_domain == "www.feishu.cn"
+    assert result.official_domain == "feishu.cn"
     assert by_type[SourceType.PRICING].status == DiscoveryStatus.NOT_FOUND
     assert by_type[SourceType.CHANGELOG].status == DiscoveryStatus.NOT_FOUND
     assert len(result.saved_source_ids) == 2

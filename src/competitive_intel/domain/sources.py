@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from .search import SearchResult
 from .webpage import FetchStatus
+
+if TYPE_CHECKING:
+    from .official_domain import OfficialDomainEvidence
 
 
 class SourceType(StrEnum):
@@ -75,7 +79,7 @@ class SourceDiscoveryLimits:
     max_queries_per_intent: int = 3
     max_results_per_query: int = 10
     max_candidate_urls: int = 20
-    max_official_validations: int = 10
+    max_official_validations: int = 3
     max_internal_links: int = 100
     max_supplemental_searches: int = 3
     max_pages: int = 8
@@ -93,5 +97,6 @@ class SourceDiscoveryResult:
     saved_source_ids: tuple[int, ...]
     pending: tuple[OfficialSourceValidation, ...]
     rejected: tuple[OfficialSourceValidation, ...]
+    domain_evidence: tuple[OfficialDomainEvidence, ...]
     warnings: tuple[str, ...]
     errors: tuple[str, ...]

@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 
 from competitive_intel.domain.content_cleaner import clean_page
 from competitive_intel.domain.names import normalize_competitor_name
+from competitive_intel.domain.official_domain import (
+    aggregate_domain_evidence,
+    select_official_domain,
+)
 from competitive_intel.domain.official_validation import validate_official_source
 from competitive_intel.domain.query_generator import generate_search_queries
 from competitive_intel.domain.search import SearchIntent, SearchRequest, SearchResult
@@ -20,7 +24,7 @@ from competitive_intel.domain.sources import (
     SourceType,
     VerificationStatus,
 )
-from competitive_intel.domain.urls import normalize_url
+from competitive_intel.domain.urls import normalize_url, registrable_domain
 from competitive_intel.domain.webpage import (
     CleanPageRequest,
     FetchPageRequest,
@@ -57,17 +61,26 @@ class SourceDiscoveryService:
         lang = language or (
             "zh" if any("\u4e00" <= c <= "\u9fff" for c in competitor_name) else "en"
         )
-        queries = generate_search_queries(
-            identity,
-            SearchIntent.OFFICIAL_SITE,
-            language=lang,
-            max_queries=self._limits.max_queries_per_intent,
+        search_plan = tuple(
+            (
+                intent,
+                generate_search_queries(
+                    identity, intent, language=lang, max_queries=1
+                )[0],
+            )
+            for intent in (
+                SearchIntent.OFFICIAL_SITE,
+                SearchIntent.FEATURES,
+                SearchIntent.PRICING,
+                SearchIntent.CHANGELOG,
+            )
         )
+        queries = tuple(query for _, query in search_plan)
         errors: list[str] = []
         warnings: list[str] = []
         candidates_by_url: dict[str, SearchResult] = {}
         executed: set[str] = set()
-        for query in queries:
+        for intent, query in search_plan:
             if query in executed:
                 continue
             executed.add(query)
@@ -75,7 +88,7 @@ class SourceDiscoveryService:
                 self._search,
                 SearchRequest(
                     query,
-                    SearchIntent.OFFICIAL_SITE,
+                    intent,
                     locale,
                     lang,
                     self._limits.max_results_per_query,
@@ -97,39 +110,77 @@ class SourceDiscoveryService:
 
         validations: list[OfficialSourceValidation] = []
         page_cache: dict[str, PageEvidence] = {}
-        for result in tuple(candidates_by_url.values())[: self._limits.max_official_validations]:
+        candidate_groups: dict[str, list[SearchResult]] = {}
+        for result in candidates_by_url.values():
             preliminary = validate_official_source(identity, result)
             if preliminary.verification_status == VerificationStatus.REJECTED:
                 validations.append(preliminary)
                 continue
+            candidate_groups.setdefault(registrable_domain(result.url), []).append(result)
+
+        representatives = [
+            min(
+                items,
+                key=lambda item: (
+                    len(normalize_url(item.url).split("/", 3)[-1]),
+                    item.rank,
+                    normalize_url(item.url),
+                ),
+            )
+            for _, items in sorted(
+                candidate_groups.items(),
+                key=lambda item: (
+                    -sum(
+                        identity.normalized_name.casefold()
+                        in f"{result.title} {result.snippet}".casefold()
+                        for result in item[1]
+                    ),
+                    -len(item[1]),
+                    item[0],
+                ),
+            )[: self._limits.max_official_validations]
+        ]
+        for result in representatives:
             page = self._fetch_evidence(result.url)
             if page is not None:
+                page_cache[normalize_url(result.url)] = page
                 page_cache[normalize_url(page.final_url)] = page
             validations.append(validate_official_source(identity, result, page))
-        if len(candidates_by_url) > self._limits.max_official_validations:
-            warnings.append("Official validation limit reached.")
+        if len(candidate_groups) > self._limits.max_official_validations:
+            warnings.append("Official domain validation limit reached.")
 
-        verified = [
-            item for item in validations
-            if item.verification_status == VerificationStatus.VERIFIED
-        ]
-        verified_domains = {item.domain for item in verified}
-        if len(verified_domains) > 1:
-            warnings.append("Multiple plausible official domains require confirmation.")
+        domain_evidence = aggregate_domain_evidence(
+            identity, tuple(candidates_by_url.values()), tuple(validations), page_cache
+        )
+        selected_domain, decision_reason = select_official_domain(domain_evidence)
+        official = None
+        if selected_domain:
+            matching = [
+                item for item in validations
+                if registrable_domain(item.normalized_url) == selected_domain
+                and item.verification_status != VerificationStatus.REJECTED
+            ]
+            if matching:
+                selected = max(matching, key=lambda item: item.confidence)
+                official = replace(
+                    selected,
+                    domain=selected_domain,
+                    verification_status=VerificationStatus.VERIFIED,
+                    confidence=min(0.99, max(selected.confidence, 0.8)),
+                    verification_reason=decision_reason,
+                )
+                validations[validations.index(selected)] = official
+        else:
+            warnings.append(decision_reason)
             validations = [
                 replace(
                     item,
                     verification_status=VerificationStatus.PENDING_CONFIRMATION,
-                    verification_reason=(
-                        "Multiple independently plausible official domains were found."
-                    ),
+                    verification_reason=decision_reason,
                 )
                 if item.verification_status == VerificationStatus.VERIFIED else item
                 for item in validations
             ]
-            verified = []
-
-        official = max(verified, key=lambda item: item.confidence, default=None)
         discoveries = ()
         saved_ids: list[int] = []
         if official:
@@ -208,6 +259,7 @@ class SourceDiscoveryService:
             tuple(dict.fromkeys(saved_ids)),
             pending,
             rejected,
+            domain_evidence,
             tuple(warnings),
             tuple(errors),
         )

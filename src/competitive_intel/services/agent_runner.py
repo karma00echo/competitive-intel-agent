@@ -394,7 +394,10 @@ class AgentRunner:
             return self._transition(
                 context, stage_id, AgentState.FACT_EXTRACTION
             )
-        if tool_name == "extract_competitor_facts":
+        if tool_name in {
+            "extract_competitor_facts",
+            "skip_fact_extraction",
+        }:
             stage_id = self._transition(
                 context, stage_id, AgentState.FACT_PERSISTENCE
             )

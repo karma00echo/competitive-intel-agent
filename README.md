@@ -366,6 +366,65 @@ Fixture scenarios cover Notion and Feishu baselines/unchanged refreshes,
 Notion price modification, feature addition/removal, and a failed pricing page
 that produces `UNCOMPARABLE`.
 
+## Phase 6.5 real-source smoke mode
+
+`SerperSearchProvider` is a bounded implementation of the existing
+`SearchProvider` interface. It sends generated queries to
+`https://google.serper.dev/search`, parses usable webpage candidates from
+`organic`, `knowledgeGraph`, and `answerBox`, and leaves all official-source
+decisions to the existing deterministic validator.
+
+Configuration is read only from `.env` or process environment:
+
+```text
+SEARCH_PROVIDER=serper
+SEARCH_API_KEY=<local secret>
+SEARCH_ENDPOINT=https://google.serper.dev/search
+```
+
+Missing credentials are a configuration error; there is no fixture fallback.
+The provider uses separate connection/read timeouts, a response-size bound,
+result limit, and at most two attempts. Authentication errors are not retried.
+Timeouts, HTTP 429, and selected HTTP 5xx responses have bounded retries.
+Credentials and provider response bodies are not placed in errors or audit
+records.
+
+Real Serper mode uses `RequestsFetcher`, not fixture HTML. Because this phase
+does not include a real fact-extraction provider, fixture facts are
+automatically blocked and extraction is recorded as:
+
+```text
+fact_extraction_status=SKIPPED
+fact_extraction_reason=REAL_CONTENT_REQUIRES_REAL_FACT_PROVIDER
+```
+
+Run the limited smoke flow:
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli analyze Linear --search-provider serper --agent-provider fixture --fact-provider fixture --skip-fact-extraction --verbose
+```
+
+Official-domain disambiguation is deterministic and auditable. Candidate URLs
+are grouped by their Public Suffix List registrable domain (eTLD+1) using
+`tldextract` with its bundled snapshot and runtime suffix downloads disabled.
+The score combines result count, query-type coverage, brand matches, homepage
+evidence, redirects, canonical/title/`og:site_name` metadata, typical official
+paths, and supporting subdomains. Known social, job, review, media, aggregator,
+store, and short-link domains are hard rejected.
+
+Automatic verification requires all of the following: no hard rejection,
+brand support in both search and page metadata, homepage evidence, a score of
+at least `8.0`, and a lead of at least `2.0` over the next eligible
+registrable domain. Otherwise the result remains `PENDING_CONFIRMATION`.
+Only the top three domain representatives receive lightweight page
+validation. The discovery tool returns a bounded `domain_evidence` audit list;
+search rank contributes no verification points.
+
+The summary explicitly reports `search_provider=serper`, `fetch_mode=real`,
+`agent_provider=fixture`, and `fact_provider=fixture`. This is source and
+snapshot validation only; it is not a production search integration or a
+real-model analysis.
+
 ## Phase-two page states
 
 | State | Meaning |
@@ -422,6 +481,7 @@ state, and tool-call results reproducible.
 ## Not implemented yet
 
 - real Agent and fact-extraction model adapters
+- production hardening for Serper and real webpage collection
 - frontend, scheduling, Playwright, RAG, and vector databases
 - notifications and production search orchestration
 - PDF, Word, and PowerPoint report export

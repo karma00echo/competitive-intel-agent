@@ -45,6 +45,8 @@ class SearchResponse:
     provider: str
     error_code: str | None = None
     error_message: str | None = None
+    request_id: str | None = None
+    retryable: bool = False
 
     @property
     def ok(self) -> bool:

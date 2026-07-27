@@ -5,6 +5,8 @@ from __future__ import annotations
 import posixpath
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
+import tldextract
+
 
 TRACKING_KEYS = {
     "gclid",
@@ -15,6 +17,8 @@ TRACKING_KEYS = {
     "_hsmi",
     "referrer",
 }
+
+_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
 
 def normalize_url(url: str, *, base_url: str | None = None) -> str:
@@ -53,11 +57,12 @@ def domain_from_url(url: str) -> str:
     return (urlsplit(normalize_url(url)).hostname or "").lower()
 
 
+def registrable_domain(value: str) -> str:
+    """Return the PSL-aware eTLD+1 without making network requests."""
+    hostname = domain_from_url(value) if "://" in value else value.strip(".").lower()
+    extracted = _TLD_EXTRACT(hostname)
+    return extracted.top_domain_under_public_suffix or hostname
+
+
 def same_site(left: str, right: str) -> bool:
-    left_domain = domain_from_url(left)
-    right_domain = domain_from_url(right)
-    return (
-        left_domain == right_domain
-        or left_domain.endswith(f".{right_domain}")
-        or right_domain.endswith(f".{left_domain}")
-    )
+    return registrable_domain(left) == registrable_domain(right)

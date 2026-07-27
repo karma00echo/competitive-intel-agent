@@ -48,6 +48,14 @@ class FixtureAgentProvider:
             call = self._overrides[request.current_state]
         else:
             tool_name = DEFAULT_TOOL_BY_STATE.get(request.current_state)
+            if tool_name not in request.allowed_tools:
+                tool_name = next(
+                    (
+                        name for name in request.allowed_tools
+                        if name != "get_run_status"
+                    ),
+                    None,
+                )
             call = (
                 self._default_call(tool_name, request, index)
                 if tool_name is not None
@@ -83,6 +91,7 @@ class FixtureAgentProvider:
             "get_competitor_profile",
             "refresh_verified_sources",
             "extract_competitor_facts",
+            "skip_fact_extraction",
             "get_previous_fact_baseline",
             "compare_competitor_facts",
             "generate_competitor_report",

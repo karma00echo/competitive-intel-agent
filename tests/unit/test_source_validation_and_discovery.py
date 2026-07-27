@@ -60,6 +60,21 @@ def test_third_party_categories_are_rejected_without_fetching() -> None:
     )
 
 
+def test_social_jobs_and_review_domains_are_hard_rejected() -> None:
+    identity = normalize_competitor_name("Acme")
+    urls = (
+        "https://www.linkedin.com/company/acme",
+        "https://jobs.lever.co/acme",
+        "https://www.g2.com/products/acme/reviews",
+    )
+    assert all(
+        validate_official_source(identity, _candidate("Acme", url, rank=1))
+        .verification_status
+        == VerificationStatus.REJECTED
+        for url in urls
+    )
+
+
 def test_failed_or_javascript_shell_page_cannot_be_verified() -> None:
     identity = normalize_competitor_name("Notion")
     candidate = _candidate("Notion", "https://notion.so/")
