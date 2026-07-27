@@ -42,7 +42,13 @@ class FactExtractionService:
         self._checker = evidence_checker or EvidenceChecker()
         self._limits = limits or FactExtractionLimits()
 
-    def extract(self, competitor_name: str) -> FactExtractionResult:
+    def extract(
+        self,
+        competitor_name: str,
+        *,
+        run_id: int | None = None,
+        current_run_only: bool = False,
+    ) -> FactExtractionResult:
         warnings: list[str] = []
         errors: list[str] = []
         saved: list[SavedFact] = []
@@ -61,28 +67,35 @@ class FactExtractionService:
                 (), (), 0, (), ("Competitor was not found.",),
             )
 
+        owns_run = run_id is None
+        stage_id: int | None = None
         with self._persistence.transaction() as session:
             all_sources = self._persistence.sources.list_verified(
                 session, competitor["id"]
             )
             sources = all_sources[: self._limits.max_pages]
-            run_id = self._persistence.agent_runs.create(
-                session,
-                competitor_id=competitor["id"],
-                input_name=competitor_name,
-                normalized_input=normalized_name,
-                run_mode="UNKNOWN",
-                current_state="FACT_EXTRACTION",
-                max_tool_calls=self._limits.max_model_calls,
-            )
-            stage_id = self._persistence.stage_events.create(
-                session,
-                run_id=run_id,
-                stage="FACT_EXTRACTION",
-                attempt_no=1,
-                max_attempts=1,
-                details={"source_count": len(sources), "provider": self._provider.name},
-            )
+            if owns_run:
+                run_id = self._persistence.agent_runs.create(
+                    session,
+                    competitor_id=competitor["id"],
+                    input_name=competitor_name,
+                    normalized_input=normalized_name,
+                    run_mode="UNKNOWN",
+                    current_state="FACT_EXTRACTION",
+                    max_tool_calls=self._limits.max_model_calls,
+                )
+                stage_id = self._persistence.stage_events.create(
+                    session,
+                    run_id=run_id,
+                    stage="FACT_EXTRACTION",
+                    attempt_no=1,
+                    max_attempts=1,
+                    details={
+                        "source_count": len(sources),
+                        "provider": self._provider.name,
+                    },
+                )
+        assert run_id is not None
         if len(all_sources) > len(sources):
             warnings.append(
                 f"Page limit reached; {len(all_sources) - len(sources)} sources were skipped."
@@ -95,8 +108,14 @@ class FactExtractionService:
         for source in sources:
             source_ids.append(source["id"])
             with self._persistence.transaction() as session:
-                snapshot = self._persistence.snapshots.get_latest_successful(
-                    session, source["id"]
+                snapshot = (
+                    self._persistence.snapshots.get_successful_for_source_run(
+                        session, source["id"], run_id
+                    )
+                    if current_run_only
+                    else self._persistence.snapshots.get_latest_successful(
+                        session, source["id"]
+                    )
                 )
             if not snapshot or not snapshot["clean_content"]:
                 warnings.append(
@@ -120,20 +139,22 @@ class FactExtractionService:
                     f"Snapshot {snapshot['id']} input was truncated to "
                     f"{self._limits.max_input_characters} characters."
                 )
-            with self._persistence.transaction() as session:
-                tool_call_id = self._persistence.tool_calls.create(
-                    session,
-                    run_id=run_id,
-                    stage_event_id=stage_id,
-                    call_index=call_index,
-                    tool_name="extract_facts",
-                    input_summary={
-                        "source_id": source["id"],
-                        "snapshot_id": snapshot["id"],
-                        "provider": self._provider.name,
-                        "input_characters": len(provider_content),
-                    },
-                )
+            tool_call_id: int | None = None
+            if owns_run:
+                with self._persistence.transaction() as session:
+                    tool_call_id = self._persistence.tool_calls.create(
+                        session,
+                        run_id=run_id,
+                        stage_event_id=stage_id,
+                        call_index=call_index,
+                        tool_name="extract_facts",
+                        input_summary={
+                            "source_id": source["id"],
+                            "snapshot_id": snapshot["id"],
+                            "provider": self._provider.name,
+                            "input_characters": len(provider_content),
+                        },
+                    )
             started = perf_counter()
             try:
                 response = self._provider.extract(
@@ -151,10 +172,11 @@ class FactExtractionService:
             except Exception as exc:
                 message = f"Source {source['id']} provider error: {type(exc).__name__}: {exc}"
                 errors.append(message)
-                self._finish_tool(
-                    tool_call_id, run_id, "FAILED", perf_counter() - started,
-                    0, 0, 0, message,
-                )
+                if tool_call_id is not None:
+                    self._finish_tool(
+                        tool_call_id, "FAILED", perf_counter() - started,
+                        0, 0, 0, message,
+                    )
                 continue
             candidates = response.candidate_facts[: self._limits.max_facts_per_page]
             candidate_count += len(candidates)
@@ -272,21 +294,24 @@ class FactExtractionService:
                         extraction_warnings=normalized.extraction_warnings,
                     )
                 )
-            self._finish_tool(
-                tool_call_id, run_id,
-                "FAILED" if response.error else "SUCCEEDED",
-                perf_counter() - started,
-                len(candidates), confirmed_for_page, rejected_for_page,
-                response.error,
-            )
+            if tool_call_id is not None:
+                self._finish_tool(
+                    tool_call_id,
+                    "FAILED" if response.error else "SUCCEEDED",
+                    perf_counter() - started,
+                    len(candidates), confirmed_for_page, rejected_for_page,
+                    response.error,
+                )
 
-        with self._persistence.transaction() as session:
-            self._persistence.stage_events.finish(
-                session, stage_id, status="SUCCEEDED"
-            )
-            self._persistence.agent_runs.finish(
-                session, run_id, status="COMPLETED", current_state="COMPLETED"
-            )
+        if owns_run:
+            assert stage_id is not None
+            with self._persistence.transaction() as session:
+                self._persistence.stage_events.finish(
+                    session, stage_id, status="SUCCEEDED"
+                )
+                self._persistence.agent_runs.finish(
+                    session, run_id, status="COMPLETED", current_state="COMPLETED"
+                )
         return FactExtractionResult(
             competitor_name, competitor["id"], run_id, self._provider.name,
             tuple(source_ids), tuple(snapshot_ids), candidate_count, tuple(saved),
@@ -296,7 +321,6 @@ class FactExtractionService:
     def _finish_tool(
         self,
         tool_call_id: int,
-        run_id: int,
         status: str,
         elapsed: float,
         candidates: int,

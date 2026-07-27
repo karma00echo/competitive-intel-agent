@@ -70,10 +70,19 @@ class LLMSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentSettings:
+    provider: str = "fixture"
+    api_key: str | None = None
+    model: str | None = None
+    endpoint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
     search: SearchSettings = field(default_factory=SearchSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
+    agent: AgentSettings = field(default_factory=AgentSettings)
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = ".env") -> "Settings":
@@ -107,5 +116,11 @@ class Settings:
                 api_key=getenv("LLM_API_KEY") or None,
                 model=getenv("LLM_MODEL") or None,
                 endpoint=getenv("LLM_ENDPOINT") or None,
+            ),
+            agent=AgentSettings(
+                provider=getenv("AGENT_PROVIDER", "fixture"),
+                api_key=getenv("AGENT_API_KEY") or None,
+                model=getenv("AGENT_MODEL") or None,
+                endpoint=getenv("AGENT_ENDPOINT") or None,
             ),
         )

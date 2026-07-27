@@ -13,10 +13,13 @@ The repository currently contains:
   verified source persistence;
 - phase four: structured fact schemas, provider-neutral extraction,
   deterministic evidence validation, stable fact keys, and confirmed fact
-  persistence.
+  persistence;
+- phase five: a controlled single-Agent Runner, native tool-calling provider
+  abstraction, deterministic state machine, bounded Agent tools, run audit,
+  structured run summaries, and a unified CLI.
 
-Fact-level history comparison, Agent Tool Calling, reports, and the complete
-CLI workflow are not implemented yet.
+Fact-level history comparison and formal baseline/change reports are not
+implemented yet.
 
 ## Requirements
 
@@ -174,6 +177,97 @@ content, require strict JSON and exact evidence, and must not use model
 knowledge or web search to fill missing facts. Real model access is not part of
 phase-four acceptance and is never used by default tests.
 
+## Phase-five controlled Agent Runner
+
+`AgentRunner` turns the existing discovery, snapshot, and fact services into
+one bounded single-Agent workflow. The program—not the model—selects
+`BASELINE` or `REFRESH`, validates every transition, controls tool
+allowlists and budgets, decides whether data may be saved, and determines the
+final state.
+
+`BASELINE` is selected when the competitor is absent or lacks any part of a
+complete profile: VERIFIED source, successful snapshot, or confirmed fact.
+`REFRESH` requires all three and skips source discovery. REFRESH creates new
+snapshots and extracts facts only from successful snapshots in the current
+run; it does not compare fact history yet.
+
+The logical state paths are:
+
+```text
+BASELINE:
+INITIALIZING -> PROFILE_LOOKUP -> MODE_SELECTION -> SOURCE_DISCOVERY
+-> SOURCE_VALIDATION -> PAGE_FETCHING -> SNAPSHOT_PERSISTENCE
+-> FACT_EXTRACTION -> FACT_PERSISTENCE -> RUN_SUMMARY -> terminal
+
+REFRESH:
+INITIALIZING -> PROFILE_LOOKUP -> MODE_SELECTION -> PAGE_FETCHING
+-> SNAPSHOT_PERSISTENCE -> FACT_EXTRACTION -> FACT_PERSISTENCE
+-> RUN_SUMMARY -> terminal
+```
+
+Terminal states are `COMPLETED`, `COMPLETED_WITH_WARNINGS`, and `FAILED`.
+Logical states are recorded in the existing `stage_events.details_json`;
+compatible phase-one audit enum values remain the physical database stages.
+
+### Provider responsibilities
+
+- `AgentProvider` chooses from tools allowed in the current state. It cannot
+  access MySQL, determine the run mode, validate evidence, or extract facts.
+- `FactExtractionProvider` converts bounded clean page content into structured
+  fact candidates. It cannot control Agent states or tools.
+- `FixtureAgentProvider` selects one deterministic tool per actionable state,
+  uses no network or credentials, and incurs no model charges.
+
+The registered Agent tools are:
+
+- `get_competitor_profile`
+- `discover_competitor_sources`
+- `refresh_verified_sources`
+- `extract_competitor_facts`
+- `get_run_status`
+- `finalize_run_summary`
+
+Every tool has a strict object schema, rejects unknown or missing arguments,
+and returns `ok`, bounded `data`, `error_code`, `error_message`, and
+`retryable`. Full HTML, full clean content, passwords, API keys, and unbounded
+model output are never returned to the Agent context.
+
+The Runner enforces a global tool budget, a per-state provider-call budget,
+and a bounded identical-call retry count. Unknown, disallowed, malformed,
+repeated, empty, and over-budget calls terminate deterministically. Only
+errors marked `retryable=true` may be retried.
+
+### Unified CLI
+
+Initialize the application database, then run the completely offline fixture
+workflow:
+
+```powershell
+python -m competitive_intel.cli analyze "Notion" --search-provider fixture --fact-provider fixture --agent-provider fixture --verbose
+python -m competitive_intel.cli analyze "飞书" --search-provider fixture --fact-provider fixture --agent-provider fixture --language zh --verbose
+```
+
+The first complete run uses `BASELINE`; a later run uses `REFRESH`. Verbose
+mode prints bounded tool requests, results, and state transitions, never raw
+page content or credentials. Exit codes are:
+
+| Code | Meaning |
+|---:|---|
+| `0` | `COMPLETED` |
+| `2` | `COMPLETED_WITH_WARNINGS` |
+| `1` | `FAILED` |
+| `64` | Invalid input or provider/configuration |
+
+The structured summary is not a formal competitor report. Its counts come
+from current-run tool results and persisted sources, snapshots, facts, and
+audit rows.
+
+To add a real tool-calling model, implement `AgentProvider` and register it in
+a future provider factory. Configuration is reserved as `AGENT_PROVIDER`,
+`AGENT_API_KEY`, `AGENT_MODEL`, and `AGENT_ENDPOINT`. The adapter must honor
+the supplied allowlist and strict tool schemas; missing real-model
+configuration does not affect fixture imports or tests.
+
 ## Phase-two page states
 
 | State | Meaning |
@@ -222,18 +316,20 @@ Default tests never contact the public internet. Fetcher tests use mocked
 requests responses and fixed HTML fixtures; snapshot tests use the same fixed
 content with a disposable local MySQL database. Source-discovery tests use
 fixed search JSON and official-site HTML. Fact-extraction tests use the JSON
-fixture provider and never call a model API or incur model charges. This keeps
-ranking, timeout, redirect, content-size, JavaScript-shell, validation,
-discovery, extraction, and evidence results reproducible.
+fixture provider, and Agent tests use `FixtureAgentProvider`; neither calls a
+model API or incurs model charges. This keeps ranking, timeout, redirect,
+content-size, JavaScript-shell, validation, discovery, extraction, evidence,
+state, and tool-call results reproducible.
 
 ## Not implemented yet
 
 - fact-level history comparison
-- Agent Tool Calling and model APIs
-- report generation
-- complete CLI business workflow
+- real Agent and fact-extraction model adapters
+- formal baseline and change-tracking reports
 - frontend, scheduling, Playwright, RAG, and vector databases
 - a real search-provider adapter; future configuration requires
   `SEARCH_PROVIDER`, `SEARCH_API_KEY`, and `SEARCH_ENDPOINT`
 - a real model fact-extraction adapter; future configuration requires
   `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, and `LLM_ENDPOINT`
+- a real AgentProvider adapter; future configuration requires
+  `AGENT_PROVIDER`, `AGENT_API_KEY`, `AGENT_MODEL`, and `AGENT_ENDPOINT`

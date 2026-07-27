@@ -167,6 +167,19 @@ class SourceRepository:
             {"competitor_id": competitor_id, "source_type": source_type},
         )
 
+    def list_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT * FROM sources
+            WHERE competitor_id = :competitor_id
+            ORDER BY source_type, id
+            """,
+            {"competitor_id": competitor_id},
+        )
+
     def find_by_normalized_url(
         self, session: Session, competitor_id: int, normalized_url: str
     ) -> Record | None:
@@ -273,6 +286,48 @@ class AgentRunRepository:
             session, "SELECT * FROM agent_runs WHERE id = :id", {"id": run_id}
         )
 
+    def update_context(
+        self,
+        session: Session,
+        run_id: int,
+        *,
+        competitor_id: int | None = None,
+        run_mode: str | None = None,
+        current_state: str | None = None,
+    ) -> None:
+        assignments: list[str] = []
+        params: dict[str, Any] = {"id": run_id}
+        for column, value in (
+            ("competitor_id", competitor_id),
+            ("run_mode", run_mode),
+            ("current_state", current_state),
+        ):
+            if value is not None:
+                assignments.append(f"{column} = :{column}")
+                params[column] = value
+        if assignments:
+            session.execute(
+                text(
+                    f"UPDATE agent_runs SET {', '.join(assignments)} "
+                    "WHERE id = :id"
+                ),
+                params,
+            )
+
+    def get_latest_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT * FROM agent_runs
+            WHERE competitor_id = :competitor_id
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """,
+            {"competitor_id": competitor_id},
+        )
+
     def finish(
         self,
         session: Session,
@@ -366,6 +421,47 @@ class SnapshotRepository:
             {"source_id": source_id, "before_run_id": before_run_id},
         )
 
+    def get_successful_for_source_run(
+        self, session: Session, source_id: int, run_id: int
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT * FROM snapshots
+            WHERE source_id = :source_id
+              AND run_id = :run_id
+              AND fetch_status = 'SUCCESS'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            {"source_id": source_id, "run_id": run_id},
+        )
+
+    def list_for_run(self, session: Session, run_id: int) -> list[Record]:
+        return _all(
+            session,
+            "SELECT * FROM snapshots WHERE run_id = :run_id ORDER BY id",
+            {"run_id": run_id},
+        )
+
+    def count_latest_successful_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> int:
+        row = _one(
+            session,
+            """
+            SELECT COUNT(DISTINCT s.source_id) AS count
+            FROM snapshots s
+            JOIN sources src ON src.id = s.source_id
+            WHERE src.competitor_id = :competitor_id
+              AND src.verification_status = 'VERIFIED'
+              AND src.is_active = TRUE
+              AND s.fetch_status = 'SUCCESS'
+            """,
+            {"competitor_id": competitor_id},
+        )
+        return int(row["count"]) if row else 0
+
 
 class ProductFactRepository:
     def create(
@@ -432,6 +528,21 @@ class ProductFactRepository:
             """,
             {"snapshot_id": snapshot_id, "fact_key": fact_key},
         )
+
+    def count_confirmed_for_competitor(
+        self, session: Session, competitor_id: int
+    ) -> int:
+        row = _one(
+            session,
+            """
+            SELECT COUNT(*) AS count FROM product_facts
+            WHERE competitor_id = :competitor_id
+              AND evidence_status = 'CONFIRMED'
+              AND statement_type = 'FACT'
+            """,
+            {"competitor_id": competitor_id},
+        )
+        return int(row["count"]) if row else 0
 
 
 class ChangeRepository:
@@ -575,6 +686,13 @@ class StageEventRepository:
             },
         )
 
+    def list_for_run(self, session: Session, run_id: int) -> list[Record]:
+        return _all(
+            session,
+            "SELECT * FROM stage_events WHERE run_id = :run_id ORDER BY id",
+            {"run_id": run_id},
+        )
+
 
 class ToolCallRepository:
     def create(
@@ -646,6 +764,13 @@ class ToolCallRepository:
                 "error_code": error_code,
                 "error_message": error_message,
             },
+        )
+
+    def list_for_run(self, session: Session, run_id: int) -> list[Record]:
+        return _all(
+            session,
+            "SELECT * FROM tool_calls WHERE run_id = :run_id ORDER BY call_index",
+            {"run_id": run_id},
         )
 
 
