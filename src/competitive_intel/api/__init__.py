@@ -1,0 +1,1 @@
+"""FastAPI contracts and routes."""

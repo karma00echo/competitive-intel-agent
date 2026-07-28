@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}竞品详情{% endblock %}
+{% block content %}
+<a class="back" href="/">← 返回控制台</a>
+<section class="panel"><p class="eyebrow">竞品档案</p><h1 id="competitor-title">正在读取…</h1><div id="competitor-overview" class="metrics"></div></section>
+<section class="panel"><h2>当前事实</h2><div id="facts" class="fact-groups"></div></section>
+<section class="grid two"><div class="panel"><h2>已验证来源与快照</h2><div id="sources" class="list"></div></div><div class="panel"><h2>最近变化</h2><div id="changes" class="list"></div></div></section>
+<section class="grid two"><div class="panel"><h2>报告</h2><div id="reports" class="list"></div></div><div class="panel"><h2>运行历史</h2><div id="competitor-runs" class="list"></div></div></section>
+{% endblock %}

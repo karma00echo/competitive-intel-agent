@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}竞品情报控制台{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=7">
+</head>
+<body data-page="{{ page }}" data-resource-id="{{ resource_id|default('') }}">
+  <header class="topbar">
+    <a class="brand" href="/">Universal Competitive Intelligence Agent</a>
+    <span class="badge">本地控制台</span>
+  </header>
+  <main class="shell">{% block content %}{% endblock %}</main>
+  <script src="{{ url_for('static', path='/app.js') }}?v=7" defer></script>
+</body>
+</html>

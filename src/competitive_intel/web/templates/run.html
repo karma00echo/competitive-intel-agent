@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}运行详情{% endblock %}
+{% block content %}
+<a class="back" href="/">← 返回控制台</a>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">运行详情</p><h1 id="run-title">正在读取…</h1></div><span id="run-state" class="status"></span></div><div id="progress" class="progress"><span></span></div><div id="run-summary" class="metrics"></div><div id="run-warning" class="notice" hidden></div></section>
+<section class="grid two"><div class="panel"><h2>状态时间线</h2><div id="events" class="timeline"></div></div><div class="panel"><h2>工具调用</h2><div id="tool-calls" class="list"></div></div></section>
+<section class="panel"><h2>结果与报告</h2><div id="run-result"></div></section>
+{% endblock %}

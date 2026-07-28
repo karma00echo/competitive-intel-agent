@@ -70,7 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--competitor")
     show.add_argument("--latest", action="store_true")
     export = report_commands.add_parser("export")
-    export.add_argument("--run-id", type=int, required=True)
+    export.add_argument("--report-id", type=int)
+    export.add_argument("--run-id", type=int)
+    export.add_argument("--competitor")
+    export.add_argument("--latest", action="store_true")
     export.add_argument(
         "--format", choices=("markdown", "json"), required=True
     )
@@ -107,7 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 api_key=settings.search.api_key,
                 endpoint=settings.search.endpoint,
             )
-        elif args.report_command == "show":
+        elif args.command == "report":
             selectors = sum(
                 (
                     args.report_id is not None,
@@ -117,7 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if selectors != 1:
                 raise CLIArgumentError(
-                    "report show requires exactly one of --report-id, "
+                    f"report {args.report_command} requires exactly one of --report-id, "
                     "--run-id, or --competitor with --latest."
                 )
     except (CLIArgumentError, ValueError) as exc:
@@ -132,7 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reports = CompetitorReportService(persistence)
             report = reports.get(
                 report_id=getattr(args, "report_id", None),
-                run_id=args.run_id,
+                run_id=getattr(args, "run_id", None),
                 competitor_name=getattr(args, "competitor", None),
                 latest=getattr(args, "latest", False),
             )

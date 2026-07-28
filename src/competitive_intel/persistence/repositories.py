@@ -1137,6 +1137,186 @@ class ToolCallRepository:
         )
 
 
+class DashboardRepository:
+    """Bounded read models for the local API and dashboard."""
+
+    def ping(self, session: Session) -> bool:
+        row = _one(session, "SELECT 1 AS ok", {})
+        return bool(row and row["ok"] == 1)
+
+    def list_competitors(
+        self,
+        session: Session,
+        *,
+        search: str | None,
+        limit: int,
+        offset: int,
+        sort: str,
+    ) -> list[Record]:
+        order = {
+            "updated_desc": "c.updated_at DESC, c.id DESC",
+            "name_asc": "c.canonical_name ASC, c.id ASC",
+            "name_desc": "c.canonical_name DESC, c.id DESC",
+        }[sort]
+        where = (
+            "WHERE c.canonical_name LIKE :search OR c.normalized_name LIKE :search"
+            if search else ""
+        )
+        return _all(
+            session,
+            f"""
+            SELECT c.id, c.canonical_name, c.normalized_name, c.official_domain,
+                   c.updated_at,
+                   (SELECT s.url FROM sources s
+                    WHERE s.competitor_id = c.id
+                      AND s.source_type = 'HOMEPAGE'
+                      AND s.verification_status = 'VERIFIED'
+                      AND s.is_active = TRUE
+                    ORDER BY s.id DESC LIMIT 1) AS official_homepage,
+                   (SELECT COUNT(*) FROM sources s
+                    WHERE s.competitor_id = c.id
+                      AND s.verification_status = 'VERIFIED'
+                      AND s.is_active = TRUE) AS verified_source_count,
+                   (SELECT COUNT(*) FROM fact_versions fv
+                    WHERE fv.competitor_id = c.id
+                      AND fv.is_current = TRUE) AS current_fact_count,
+                   (SELECT ar.id FROM agent_runs ar
+                    WHERE ar.competitor_id = c.id
+                    ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_id,
+                   (SELECT ar.current_state FROM agent_runs ar
+                    WHERE ar.competitor_id = c.id
+                    ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_status,
+                   (SELECT r.id FROM reports r
+                    WHERE r.competitor_id = c.id AND r.status = 'GENERATED'
+                    ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS latest_report_id
+            FROM competitors c
+            {where}
+            ORDER BY {order}
+            LIMIT :limit OFFSET :offset
+            """,
+            {
+                "search": f"%{search}%" if search else None,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+
+    def competitor_overview(
+        self, session: Session, competitor_id: int
+    ) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT c.*,
+                   (SELECT COUNT(*) FROM sources s
+                    WHERE s.competitor_id = c.id) AS source_count,
+                   (SELECT COUNT(*) FROM sources s
+                    WHERE s.competitor_id = c.id
+                      AND s.verification_status = 'VERIFIED'
+                      AND s.is_active = TRUE) AS verified_source_count,
+                   (SELECT COUNT(*) FROM snapshots sn
+                    JOIN sources s ON s.id = sn.source_id
+                    WHERE s.competitor_id = c.id) AS snapshot_count,
+                   (SELECT COUNT(*) FROM snapshots sn
+                    JOIN sources s ON s.id = sn.source_id
+                    WHERE s.competitor_id = c.id
+                      AND sn.fetch_status = 'SUCCESS') AS successful_snapshot_count,
+                   (SELECT ar.id FROM agent_runs ar
+                    WHERE ar.competitor_id = c.id
+                    ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_id,
+                   (SELECT r.id FROM reports r
+                    WHERE r.competitor_id = c.id AND r.status = 'GENERATED'
+                    ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS latest_report_id
+            FROM competitors c WHERE c.id = :id
+            """,
+            {"id": competitor_id},
+        )
+
+    def list_sources(
+        self, session: Session, competitor_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT s.*,
+                   (SELECT sn.fetch_status FROM snapshots sn
+                    WHERE sn.source_id = s.id
+                    ORDER BY sn.fetched_at DESC, sn.id DESC LIMIT 1)
+                       AS latest_snapshot_status,
+                   (SELECT sn.fetched_at FROM snapshots sn
+                    WHERE sn.source_id = s.id
+                    ORDER BY sn.fetched_at DESC, sn.id DESC LIMIT 1)
+                       AS latest_fetched_at
+            FROM sources s
+            WHERE s.competitor_id = :competitor_id
+            ORDER BY s.source_type, s.id
+            """,
+            {"competitor_id": competitor_id},
+        )
+
+    def list_reports(
+        self, session: Session, competitor_id: int
+    ) -> list[Record]:
+        return _all(
+            session,
+            """
+            SELECT * FROM reports
+            WHERE competitor_id = :competitor_id
+            ORDER BY generated_at DESC, id DESC
+            """,
+            {"competitor_id": competitor_id},
+        )
+
+    def list_runs(
+        self,
+        session: Session,
+        *,
+        competitor_id: int | None,
+        state: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[Record]:
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if competitor_id is not None:
+            clauses.append("ar.competitor_id = :competitor_id")
+            params["competitor_id"] = competitor_id
+        if state:
+            clauses.append("ar.current_state = :state")
+            params["state"] = state
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return _all(
+            session,
+            f"""
+            SELECT ar.*, c.canonical_name AS competitor_name,
+                   (SELECT r.id FROM reports r WHERE r.run_id = ar.id
+                    ORDER BY r.id DESC LIMIT 1) AS report_id
+            FROM agent_runs ar
+            LEFT JOIN competitors c ON c.id = ar.competitor_id
+            {where}
+            ORDER BY ar.started_at DESC, ar.id DESC
+            LIMIT :limit OFFSET :offset
+            """,
+            params,
+        )
+
+    def run_detail(self, session: Session, run_id: int) -> Record | None:
+        return _one(
+            session,
+            """
+            SELECT ar.*, c.canonical_name AS competitor_name,
+                   (SELECT r.id FROM reports r WHERE r.run_id = ar.id
+                    ORDER BY r.id DESC LIMIT 1) AS report_id,
+                   (SELECT r.summary_json FROM reports r WHERE r.run_id = ar.id
+                    ORDER BY r.id DESC LIMIT 1) AS report_summary
+            FROM agent_runs ar
+            LEFT JOIN competitors c ON c.id = ar.competitor_id
+            WHERE ar.id = :id
+            """,
+            {"id": run_id},
+        )
+
+
 class Persistence:
     """Repository aggregate exposed to the application layer."""
 
@@ -1153,6 +1333,7 @@ class Persistence:
         self.reports = ReportRepository()
         self.stage_events = StageEventRepository()
         self.tool_calls = ToolCallRepository()
+        self.dashboard = DashboardRepository()
 
     @contextmanager
     def transaction(self) -> Iterator[Session]:

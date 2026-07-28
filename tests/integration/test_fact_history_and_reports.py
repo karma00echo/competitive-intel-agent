@@ -255,3 +255,22 @@ def test_report_json_markdown_audit_and_cli_show_export(
     ]) == 0
     exported = json.loads(json_output.read_text(encoding="utf-8"))
     assert exported["report_type"] == "CHANGE_TRACKING_REPORT"
+    by_id = tmp_path / "by-id.md"
+    assert main([
+        "report", "export", "--report-id", str(report["id"]),
+        "--format", "markdown", "--output", str(by_id),
+    ]) == 0
+    assert by_id.read_text(encoding="utf-8").startswith("# Notion")
+    latest_output = tmp_path / "latest.json"
+    assert main([
+        "report", "export", "--competitor", "Notion", "--latest",
+        "--format", "json", "--output", str(latest_output),
+    ]) == 0
+    assert json.loads(latest_output.read_text(encoding="utf-8"))[
+        "report_type"
+    ] == "CHANGE_TRACKING_REPORT"
+    assert main([
+        "report", "export", "--run-id", str(refresh.run_id),
+        "--report-id", str(report["id"]), "--format", "markdown",
+        "--output", str(tmp_path / "invalid.md"),
+    ]) == 64

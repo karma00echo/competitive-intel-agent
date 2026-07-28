@@ -425,6 +425,94 @@ The summary explicitly reports `search_provider=serper`, `fetch_mode=real`,
 snapshot validation only; it is not a production search integration or a
 real-model analysis.
 
+## Phase 7 local FastAPI console
+
+Phase 7 adds a loopback-only FastAPI application, JSON API, Jinja2 pages, and
+native CSS/JavaScript. It reuses the existing services, controlled
+`AgentRunner`, `Persistence`, repositories, MySQL schema, fixture providers,
+and Serper integration. No Node.js or CDN is required.
+
+Initialize the existing database and start the local service:
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" scripts/init_database.py --database-exists
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.web
+```
+
+The terminal prints:
+
+```text
+Competitive Intelligence Agent is running
+Open: http://127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:8000`. The server deliberately binds only to
+`127.0.0.1`, not `0.0.0.0`.
+
+The JSON API provides:
+
+- `GET /api/health`
+- `GET /api/competitors` and `GET /api/competitors/{id}`
+- `GET /api/competitors/{id}/sources`
+- `GET /api/competitors/{id}/facts`
+- `GET /api/competitors/{id}/changes`
+- `GET /api/competitors/{id}/reports`
+- `GET /api/reports/{id}`
+- `GET /api/reports/{id}/download?format=markdown`
+- `GET /api/runs` and `GET /api/runs/{id}`
+- `GET /api/runs/{id}/events`
+- `GET /api/runs/{id}/tool-calls`
+- `POST /api/analyses`
+
+HTML pages are `/`, `/competitors/{id}`, `/runs/{id}`, and `/reports/{id}`.
+The run page polls the run and event APIs once per second and stops on
+`COMPLETED`, `COMPLETED_WITH_WARNINGS`, or `FAILED`, with a ten-minute client
+limit. Internal states are translated into readable Chinese labels.
+
+Analysis requests run in a fixed-size in-process thread pool. The default
+global limit is two and can be reduced or increased up to four with
+`WEB_MAX_CONCURRENT_ANALYSES`. Only one active analysis is allowed for each
+normalized competitor; a second request receives
+`ANALYSIS_ALREADY_RUNNING`. This executor is intended for a single local
+process and is not a distributed queue or suitable for multi-instance
+production deployment.
+
+Fixture search, fetching, fact extraction, and Agent tool selection remain the
+default demonstration path. Selecting Serper performs real search and real
+HTTP fetching and requires `SEARCH_API_KEY` in the local ignored `.env`.
+Because a real fact provider is not implemented, Serper requests must set
+`skip_fact_extraction=true`; the UI enforces this and clearly displays the
+skip reason. Fixture facts are never applied to real page content.
+
+The API returns bounded summaries only. It does not expose database
+credentials, API keys, full captured HTML, unlimited cleaned page text, raw
+model output, stack traces, arbitrary SQL, or arbitrary URL-fetch endpoints.
+Templates use automatic escaping, browser rendering uses `textContent`, report
+filenames are sanitized, provider/scenario values are allowlisted, and
+competitor names and tool budgets are bounded. The console has no login and
+must remain local.
+
+CLI analysis exit codes are:
+
+- `0`: `COMPLETED`
+- `2`: `COMPLETED_WITH_WARNINGS`
+- `1`: `FAILED`
+- `64`: invalid input or configuration
+
+Report export supports exactly one selector:
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report export --report-id 1 --format markdown --output report.md
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report export --run-id 1 --format json --output report.json
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.cli report export --competitor Notion --latest --format markdown --output notion.md
+```
+
+Troubleshooting: check `/api/health`, verify MySQL is running and `.env`
+contains the local database settings, and confirm the selected disposable test
+database ends in `_test` when running pytest. Serper mode additionally requires
+a valid local key. A `COMPLETED_WITH_WARNINGS` run is successful with explicit
+limitations, not a failed run.
+
 ## Phase-two page states
 
 | State | Meaning |

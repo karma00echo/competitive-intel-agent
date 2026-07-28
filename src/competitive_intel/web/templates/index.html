@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}竞品情报控制台{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">受控、可审计、有证据</p>
+  <h1>从一个竞品名称开始</h1>
+  <p>自动发现官方来源，建立事实档案，并在后续运行中识别变化。</p>
+</section>
+<section class="panel">
+  <form id="analysis-form" class="analysis-form">
+    <label class="wide">竞品名称<input id="competitor-name" maxlength="120" required placeholder="Notion、飞书或 Linear"></label>
+    <label>语言<select id="language"><option value="en">English</option><option value="zh">中文</option></select></label>
+    <label>搜索方式<select id="search-provider"><option value="fixture">Fixture 离线演示</option><option value="serper">Serper 真实搜索</option></select></label>
+    <label>Fixture 场景<select id="fixture-scenario"><option value="default">默认</option><option value="price_changed">价格变化</option><option value="feature_added">新增功能</option><option value="feature_removed">移除功能</option><option value="page_failure">页面失败</option></select></label>
+    <label class="checkbox"><input id="skip-facts" type="checkbox"> 跳过事实提取</label>
+    <div id="provider-notice" class="notice wide">Fixture 模式完全离线，适合稳定演示。</div>
+    <button class="primary wide" type="submit">开始分析</button>
+    <p id="form-error" class="error wide" hidden></p>
+  </form>
+</section>
+<section class="grid two">
+  <div class="panel"><div class="section-head"><h2>最近运行</h2><span id="health"></span></div><div id="recent-runs" class="list"></div></div>
+  <div class="panel"><div class="section-head"><h2>竞品档案</h2></div><div id="competitors" class="list"></div></div>
+</section>
+{% endblock %}

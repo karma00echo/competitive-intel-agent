@@ -78,11 +78,17 @@ class AgentSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class WebSettings:
+    max_concurrent_analyses: int = 2
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
     search: SearchSettings = field(default_factory=SearchSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
+    web: WebSettings = field(default_factory=WebSettings)
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = ".env") -> "Settings":
@@ -122,5 +128,10 @@ class Settings:
                 api_key=getenv("AGENT_API_KEY") or None,
                 model=getenv("AGENT_MODEL") or None,
                 endpoint=getenv("AGENT_ENDPOINT") or None,
+            ),
+            web=WebSettings(
+                max_concurrent_analyses=max(
+                    1, min(4, int(getenv("WEB_MAX_CONCURRENT_ANALYSES", "2")))
+                )
             ),
         )
