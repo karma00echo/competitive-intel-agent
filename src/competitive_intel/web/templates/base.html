@@ -4,14 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}竞品情报控制台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=7">
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=12">
+  <link rel="stylesheet" href="{{ url_for('static', path='/workspace.css') }}?v=12">
 </head>
 <body data-page="{{ page }}" data-resource-id="{{ resource_id|default('') }}">
   <header class="topbar">
     <a class="brand" href="/">Universal Competitive Intelligence Agent</a>
+    <nav class="topnav">
+      <a href="/">工作台</a>
+      <a href="/dashboard">管理视图</a>
+      <a href="/dashboard#competitors">竞品档案</a>
+      <a href="/dashboard#recent-runs">运行历史</a>
+      <a href="/api/health">系统状态</a>
+    </nav>
     <span class="badge">本地控制台</span>
   </header>
   <main class="shell">{% block content %}{% endblock %}</main>
-  <script src="{{ url_for('static', path='/app.js') }}?v=7" defer></script>
+  <script src="{{ url_for('static', path='/app.js') }}?v=12" defer></script>
 </body>
 </html>

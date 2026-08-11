@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}竞品情报 Agent 工作台{% endblock %}
+{% block content %}
+<section class="workspace" aria-label="竞品情报 Agent 工作台">
+  <aside class="workspace-left">
+    <div class="workspace-side-head">
+      <div><p class="eyebrow">Intelligence</p><h1>分析会话</h1></div>
+      <button id="new-analysis" class="icon-button" type="button">＋</button>
+    </div>
+    <label class="workspace-search">
+      <span class="sr-only">搜索会话或竞品</span>
+      <input id="workspace-search" maxlength="120" placeholder="搜索竞品或运行">
+    </label>
+    <div class="side-section">
+      <h2>最近分析</h2>
+      <div id="workspace-runs" class="conversation-list"></div>
+    </div>
+    <div class="side-section competitor-section">
+      <h2>竞品档案</h2>
+      <div id="workspace-competitors" class="compact-list"></div>
+    </div>
+  </aside>
+
+  <main class="workspace-center">
+    <header class="agent-header">
+      <div>
+        <p id="workspace-kicker" class="eyebrow">受控 Fixture Agent</p>
+        <h1 id="workspace-title">竞品情报 Agent</h1>
+        <p id="workspace-subtitle">选择历史运行，或新建一次受控分析。</p>
+      </div>
+      <span id="workspace-state" class="status">待选择</span>
+    </header>
+    <div class="capability-strip">
+      <span>当前 Agent：受控 Fixture Agent</span>
+      <span>真实搜索：可用</span>
+      <span>真实网页抓取：可用</span>
+      <span>真实事实提取：未接入</span>
+    </div>
+    <div id="workspace-progress" class="progress workspace-progress"><span></span></div>
+    <section id="message-stream" class="message-stream" aria-live="polite">
+      <div class="workspace-empty">
+        <strong>从一个竞品名称开始</strong>
+        <p>每条分析运行对应一条可回放会话，消息只由真实审计数据确定性生成。</p>
+      </div>
+    </section>
+    <footer class="command-dock">
+      <div class="quick-actions">
+        <button type="button" data-command="new">新建竞品分析</button>
+        <button type="button" data-command="refresh">刷新当前竞品</button>
+        <button type="button" data-command="report">查看最新报告</button>
+        <button type="button" data-command="changes">查看最近变化</button>
+      </div>
+      <form id="command-form">
+        <input id="command-input" maxlength="180" placeholder="输入：分析 Notion、打开运行 12、查看 Notion 最新报告">
+        <button class="primary" type="submit">执行</button>
+      </form>
+      <p id="command-feedback" class="command-feedback">
+        当前仅支持分析、刷新、报告、变化和运行查询，不是自由聊天。
+      </p>
+    </footer>
+  </main>
+
+  <aside id="workspace-trace" class="workspace-right">
+    <div class="trace-head">
+      <div><p class="eyebrow">Audit</p><h2>执行轨迹</h2></div>
+      <button id="trace-toggle" class="icon-button" type="button" aria-expanded="true">轨迹</button>
+    </div>
+    <div class="trace-tabs" role="tablist">
+      <button class="active" data-trace-tab="timeline" type="button">状态时间线</button>
+      <button data-trace-tab="tools" type="button">工具调用</button>
+      <button data-trace-tab="evidence" type="button">来源证据</button>
+      <button data-trace-tab="details" type="button">运行详情</button>
+    </div>
+    <div id="trace-timeline" class="trace-panel active"></div>
+    <div id="trace-tools" class="trace-panel"></div>
+    <div id="trace-evidence" class="trace-panel"></div>
+    <div id="trace-details" class="trace-panel"></div>
+  </aside>
+</section>
+
+<dialog id="analysis-dialog">
+  <form id="workspace-analysis-form" class="dialog-form">
+    <div class="section-head">
+      <div><p class="eyebrow">New analysis</p><h2>新建竞品分析</h2></div>
+      <button id="close-analysis" class="icon-button" type="button">×</button>
+    </div>
+    <label>竞品名称<input id="workspace-competitor-name" maxlength="120" required placeholder="Notion、飞书或 Linear"></label>
+    <div class="grid two">
+      <label>语言<select id="workspace-language"><option value="zh">中文</option><option value="en">English</option></select></label>
+      <label>搜索方式<select id="workspace-provider"><option value="fixture">Fixture 离线演示</option><option value="serper">Serper 真实搜索</option></select></label>
+    </div>
+    <label>Fixture 场景<select id="workspace-scenario"><option value="default">默认</option><option value="price_changed">价格变化</option><option value="feature_added">新增功能</option><option value="feature_removed">移除功能</option><option value="page_failure">页面失败</option></select></label>
+    <div id="workspace-provider-notice" class="notice">Fixture 模式使用固定离线数据。</div>
+    <p id="workspace-form-error" class="error" hidden></p>
+    <button class="primary" type="submit">开始受控分析</button>
+  </form>
+</dialog>
+{% endblock %}

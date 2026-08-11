@@ -25,6 +25,12 @@ from competitive_intel.web.runtime import (
     AnalysisCapacityReached,
     AnalysisStartFailed,
 )
+from competitive_intel.web.workspace import (
+    STATE_LABELS,
+    build_message_stream,
+    progress_for_events,
+    tool_view,
+)
 
 
 router = APIRouter(prefix="/api")
@@ -74,6 +80,23 @@ def _run_summary_from_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
+def _page_comparison_summary(calls: list[dict[str, Any]]) -> dict[str, int]:
+    for call in reversed(calls):
+        if call["tool_name"] != "refresh_verified_sources":
+            continue
+        payload = decode_json(call.get("output_summary"))
+        if not isinstance(payload, dict):
+            return {}
+        return dict(
+            Counter(
+                page.get("page_status")
+                for page in payload.get("pages", [])[:100]
+                if isinstance(page, dict) and page.get("page_status")
+            )
+        )
+    return {}
+
+
 def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any]:
     summary = _run_summary_from_calls(calls)
     final_state = summary.get("final_state")
@@ -116,6 +139,55 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
         "page_fetch_failure_count": summary.get("page_fetch_failure_count", 0),
         "verified_source_count": summary.get("verified_source_count", 0),
         "confirmed_fact_count": summary.get("confirmed_fact_count", 0),
+    }
+
+
+def _event_view(row: dict[str, Any]) -> dict[str, Any]:
+    details = decode_json(row["details_json"]) or {}
+    stage = details.get("logical_state", row["stage"])
+    return {
+        "event_id": row["id"],
+        "stage": stage,
+        "display_name": STATE_LABELS.get(stage, stage),
+        "attempt": row["attempt_no"],
+        "status": row["status"],
+        "started_at": row["started_at"],
+        "finished_at": row["finished_at"],
+        "details": _sanitize(details),
+        "error_code": row["error_code"],
+        "error_message": _sanitize(row["error_message"]),
+    }
+
+
+def _tool_call_view(row: dict[str, Any]) -> dict[str, Any]:
+    return tool_view(
+        {
+            "tool_call_id": row["id"],
+            "call_index": row["call_index"],
+            "tool_name": row["tool_name"],
+            "status": row["status"],
+            "input": _sanitize(row["input_summary"]),
+            "output": _sanitize(row["output_summary"]),
+            "retryable": bool(row["retryable"]),
+            "duration_ms": row["duration_ms"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "error_code": row["error_code"],
+            "error_message": _sanitize(row["error_message"]),
+        }
+    )
+
+
+def _source_view(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_id": row["id"],
+        "source_type": row["source_type"],
+        "url": row["url"],
+        "verification_status": row["verification_status"],
+        "enabled": bool(row["is_active"]),
+        "latest_snapshot_status": row["latest_snapshot_status"],
+        "latest_fetched_at": row["latest_fetched_at"],
+        "evidence_excerpt": (row.get("verification_reason") or "")[:500],
     }
 
 
@@ -226,13 +298,7 @@ def competitor_sources(request: Request, competitor_id: int) -> APIEnvelope:
         rows = request.app.state.persistence.dashboard.list_sources(
             session, competitor_id
         )
-    return APIEnvelope(data={"items": [{
-        "source_id": row["id"], "source_type": row["source_type"],
-        "url": row["url"], "verification_status": row["verification_status"],
-        "enabled": bool(row["is_active"]),
-        "latest_snapshot_status": row["latest_snapshot_status"],
-        "latest_fetched_at": row["latest_fetched_at"],
-    } for row in rows]})
+    return APIEnvelope(data={"items": [_source_view(row) for row in rows]})
 
 
 @router.get("/competitors/{competitor_id}/facts", response_model=APIEnvelope)
@@ -432,18 +498,7 @@ def run_events(request: Request, run_id: int) -> APIEnvelope:
         if not request.app.state.persistence.agent_runs.get(session, run_id):
             raise _error(404, "RUN_NOT_FOUND", "Run was not found.")
         rows = request.app.state.persistence.stage_events.list_for_run(session, run_id)
-    items = []
-    for row in rows:
-        details = decode_json(row["details_json"]) or {}
-        items.append({
-            "event_id": row["id"],
-            "stage": details.get("logical_state", row["stage"]),
-            "attempt": row["attempt_no"], "status": row["status"],
-            "started_at": row["started_at"], "finished_at": row["finished_at"],
-            "details": _sanitize(details), "error_code": row["error_code"],
-            "error_message": _sanitize(row["error_message"]),
-        })
-    return APIEnvelope(data={"items": items})
+    return APIEnvelope(data={"items": [_event_view(row) for row in rows]})
 
 
 @router.get("/runs/{run_id}/tool-calls", response_model=APIEnvelope)
@@ -452,15 +507,161 @@ def run_tool_calls(request: Request, run_id: int) -> APIEnvelope:
         if not request.app.state.persistence.agent_runs.get(session, run_id):
             raise _error(404, "RUN_NOT_FOUND", "Run was not found.")
         rows = request.app.state.persistence.tool_calls.list_for_run(session, run_id)
-    return APIEnvelope(data={"items": [{
-        "tool_call_id": row["id"], "call_index": row["call_index"],
-        "tool_name": row["tool_name"], "status": row["status"],
-        "input": _sanitize(row["input_summary"]),
-        "output": _sanitize(row["output_summary"]),
-        "retryable": bool(row["retryable"]), "duration_ms": row["duration_ms"],
-        "started_at": row["started_at"], "finished_at": row["finished_at"],
-        "error_code": row["error_code"], "error_message": _sanitize(row["error_message"]),
-    } for row in rows]})
+    return APIEnvelope(data={"items": [_tool_call_view(row) for row in rows]})
+
+
+@router.get("/workspace/runs/{run_id}", response_model=APIEnvelope)
+def workspace_run(request: Request, run_id: int) -> APIEnvelope:
+    """Return a bounded, sanitized projection for deterministic run replay."""
+    with request.app.state.persistence.transaction() as session:
+        row = request.app.state.persistence.dashboard.run_detail(session, run_id)
+        if not row:
+            raise _error(404, "RUN_NOT_FOUND", "Run was not found.")
+        raw_calls = request.app.state.persistence.tool_calls.list_for_run(
+            session, run_id
+        )
+        raw_events = request.app.state.persistence.stage_events.list_for_run(
+            session, run_id
+        )
+        snapshots = request.app.state.persistence.snapshots.list_for_run(
+            session, run_id
+        )
+        competitor_id = row.get("competitor_id")
+        competitor = (
+            request.app.state.persistence.dashboard.competitor_overview(
+                session, competitor_id
+            )
+            if competitor_id else None
+        )
+        raw_sources = (
+            request.app.state.persistence.dashboard.list_sources(
+                session, competitor_id
+            )
+            if competitor_id else []
+        )
+        raw_facts = (
+            request.app.state.persistence.fact_observations.list_for_run(
+                session, run_id
+            )
+            if competitor_id else []
+        )
+        raw_changes = (
+            [
+                change
+                for change in request.app.state.persistence.changes.list_for_competitor(
+                    session, competitor_id
+                )
+                if change["run_id"] == run_id
+            ]
+            if competitor_id else []
+        )
+        report_record = next(
+            (
+                report
+                for report in request.app.state.persistence.dashboard.list_reports(
+                    session, competitor_id
+                )
+                if report["run_id"] == run_id
+            ),
+            None,
+        ) if competitor_id else None
+
+    calls = [_tool_call_view(call) for call in raw_calls[:40]]
+    events = [_event_view(event) for event in raw_events[:80]]
+    run = _run_view(row, raw_calls)
+    if row["status"] == "RUNNING" and events:
+        run["current_state"] = events[-1]["stage"]
+    run["snapshot_count"] = len(snapshots)
+    run["snapshot_statuses"] = dict(
+        Counter(snapshot["fetch_status"] for snapshot in snapshots)
+    )
+    run["page_comparison_summary"] = _page_comparison_summary(raw_calls)
+    run["progress_percent"] = progress_for_events(
+        events, run.get("final_state") or run["current_state"]
+    )
+
+    sources = [_source_view(source) for source in raw_sources[:50]]
+    facts = [
+        {
+            "fact_id": fact["id"],
+            "category": fact["fact_category"],
+            "fact_key": fact["fact_key"],
+            "display_value": formatter.format(
+                fact["fact_category"],
+                fact["normalized_value"],
+                fact_key=fact["fact_key"],
+                value_text=fact.get("value_text"),
+            ),
+            "confidence": float(fact["observed_confidence"]),
+            "evidence_excerpt": fact["observed_evidence"][:500],
+            "source_url": fact["observed_source_url"],
+        }
+        for fact in raw_facts[:100]
+    ]
+    changes = []
+    for change in raw_changes[:100]:
+        category = change["fact_key"].split(".", 1)[0].upper()
+        old_display, new_display = formatter.format_change(
+            category, change["fact_key"], change["old_value"], change["new_value"]
+        )
+        changes.append(
+            {
+                "change_id": change["id"],
+                "change_type": (
+                    "UNCOMPARABLE"
+                    if change["change_type"] == "UNKNOWN"
+                    else change["change_type"]
+                ),
+                "category": category,
+                "fact_key": change["fact_key"],
+                "old_display_value": old_display,
+                "new_display_value": new_display,
+                "evidence_excerpt": (change.get("evidence_text") or "")[:500],
+                "reason": (change.get("impact_assessment") or "")[:500],
+            }
+        )
+
+    report = None
+    if report_record:
+        rendered = CompetitorReportService(request.app.state.persistence).get(
+            report_id=report_record["id"]
+        )
+        if rendered:
+            report = {
+                "report_id": rendered.report_id,
+                "report_type": rendered.report_type,
+                "title": rendered.title,
+                "executive_summary": rendered.executive_summary,
+                "change_summary": _sanitize(rendered.change_summary),
+                "download_url": (
+                    f"/api/reports/{rendered.report_id}/download?format=markdown"
+                ),
+            }
+
+    messages = build_message_stream(
+        run=run,
+        events=events,
+        calls=calls,
+        sources=sources,
+        facts=facts,
+        changes=changes,
+        report=report,
+    )
+    return APIEnvelope(
+        data={
+            "run": run,
+            "competitor": _sanitize(competitor) if competitor else None,
+            "messages": messages[:30],
+            "events": events,
+            "tool_calls": calls,
+            "sources": sources,
+            "facts": facts,
+            "changes": changes,
+            "report": report,
+            "provider_summary": run["provider_summary"],
+            "fact_extraction_status": run.get("fact_extraction_status"),
+        }
+    )
 
 
 @router.post("/analyses", response_model=AnalysisAccepted, status_code=202)

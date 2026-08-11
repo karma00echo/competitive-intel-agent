@@ -8,11 +8,18 @@ from typing import Any
 
 
 def decode_json(value: Any) -> Any:
-    if isinstance(value, str):
+    # Some legacy MySQL JSON values contain a serialized JSON string. Decode
+    # only a bounded number of layers for stable, readable presentation.
+    for _ in range(3):
+        if not isinstance(value, str):
+            break
         try:
-            return json.loads(value)
+            decoded = json.loads(value)
         except (json.JSONDecodeError, TypeError):
-            return value
+            break
+        if decoded == value:
+            break
+        value = decoded
     return value
 
 

@@ -462,9 +462,11 @@ The JSON API provides:
 - `GET /api/runs` and `GET /api/runs/{id}`
 - `GET /api/runs/{id}/events`
 - `GET /api/runs/{id}/tool-calls`
+- `GET /api/workspace/runs/{id}`
 - `POST /api/analyses`
 
-HTML pages are `/`, `/competitors/{id}`, `/runs/{id}`, and `/reports/{id}`.
+HTML pages are `/`, `/workspace`, `/dashboard`, `/competitors/{id}`,
+`/runs/{id}`, and `/reports/{id}`.
 The run page polls the run and event APIs once per second and stops on
 `COMPLETED`, `COMPLETED_WITH_WARNINGS`, or `FAILED`, with a ten-minute client
 limit. Internal states are translated into readable Chinese labels.
@@ -491,6 +493,39 @@ Templates use automatic escaping, browser rendering uses `textContent`, report
 filenames are sanitized, provider/scenario values are allowlisted, and
 competitor names and tool budgets are bounded. The console has no login and
 must remain local.
+
+## Phase 8 Agent workspace
+
+The root page is now a three-column competitive-intelligence workspace. The
+previous Phase 7 management view remains available at `/dashboard`.
+
+- The left column lists recent analysis conversations and competitor profiles.
+  A conversation is an existing `agent_runs` record; Phase 8 does not add a
+  conversation table or a second task system.
+- The center column replays a deterministic message stream and structured
+  source, fetch, fact, change, and report cards. Messages are derived only from
+  the original input, `stage_events`, `tool_calls`, run summary, facts,
+  changes, and report data. No model invents chat responses.
+- The right column displays the state timeline, bounded tool-call summaries,
+  source evidence, providers, timing, and run metadata. Selecting a historical
+  conversation performs a read-only replay and never reruns the Agent.
+
+The command box is a controlled intent interface, not free-form chat. It
+recognizes analysis or refresh commands, latest-report and recent-change
+queries, numeric run opening, and the explanation for skipped fact extraction.
+Unrecognized input receives an explicit capability-boundary message. New
+analysis requests continue to use the existing `POST /api/analyses` endpoint.
+
+Progress is mapped deterministically from the controlled state machine and is
+monotonic; it is not guessed from elapsed time. Active runs poll once per
+second and stop at a terminal state or after the existing ten-minute client
+limit. On narrow screens the execution trace collapses into a side panel.
+
+The workspace identifies the current Agent as the controlled
+`FixtureAgentProvider`. Serper can perform real search and real HTTP fetching,
+but real fact extraction remains unavailable and is visibly skipped. This
+interface is not a real natural-language Agent and makes no claim that a model
+autonomously understood arbitrary instructions.
 
 CLI analysis exit codes are:
 
@@ -568,13 +603,12 @@ state, and tool-call results reproducible.
 
 ## Not implemented yet
 
-- real Agent and fact-extraction model adapters
+- real natural-language AgentProvider and real fact-extraction model adapters
 - production hardening for Serper and real webpage collection
-- frontend, scheduling, Playwright, RAG, and vector databases
+- authentication, public/cloud or multi-instance deployment
+- distributed task queues, scheduling, Playwright, RAG, and vector databases
 - notifications and production search orchestration
 - PDF, Word, and PowerPoint report export
-- a real search-provider adapter; future configuration requires
-  `SEARCH_PROVIDER`, `SEARCH_API_KEY`, and `SEARCH_ENDPOINT`
 - a real model fact-extraction adapter; future configuration requires
   `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, and `LLM_ENDPOINT`
 - a real AgentProvider adapter; future configuration requires

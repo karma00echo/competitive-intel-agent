@@ -98,6 +98,13 @@ def create_app(
     app.mount("/static", StaticFiles(directory=str(WEB_ROOT / "static")), name="static")
 
     @app.get("/")
+    @app.get("/workspace")
+    def workspace(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="workspace.html", context={"page": "workspace"}
+        )
+
+    @app.get("/dashboard")
     def home(request: Request):
         return templates.TemplateResponse(
             request=request, name="index.html", context={"page": "home"}

@@ -46,13 +46,21 @@ def test_app_factory_health_pages_and_static_assets(persistence) -> None:
         assert health.status_code == 200
         assert health.json()["database_status"] == "available"
         assert health.json()["fixture_available"] is True
-        for path in ("/", "/runs/1", "/competitors/1", "/reports/1"):
+        for path in (
+            "/", "/workspace", "/dashboard", "/runs/1",
+            "/competitors/1", "/reports/1",
+        ):
             response = client.get(path)
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
             assert "<script>alert" not in response.text
+        workspace = client.get("/")
+        assert "竞品情报 Agent 工作台" in workspace.text
+        assert "当前仅支持分析、刷新、报告、变化和运行查询" in workspace.text
+        assert "真实事实提取：未接入" in workspace.text
         assert client.get("/static/app.css").status_code == 200
         assert client.get("/static/app.js").status_code == 200
+        assert client.get("/static/workspace.css").status_code == 200
 
 
 def test_health_is_structured_when_database_is_unavailable() -> None:
@@ -134,6 +142,38 @@ def test_fixture_analysis_all_read_apis_and_price_change(persistence) -> None:
         refresh_result = _wait(client, refresh.json()["run_id"])
         assert refresh_result["final_state"] == "COMPLETED"
         assert refresh_result["change_summary"]["modified_count"] == 1
+        replay = client.get(
+            f"/api/workspace/runs/{refresh_result['run_id']}"
+        )
+        assert replay.status_code == 200
+        workspace = replay.json()["data"]
+        assert workspace["run"]["progress_percent"] == 100
+        assert workspace["run"]["run_mode"] == "REFRESH"
+        assert workspace["run"]["page_comparison_summary"] == {
+            "UNCHANGED": 3, "PAGE_CHANGED": 1,
+        }
+        assert workspace["competitor"]["canonical_name"] == "Notion"
+        assert workspace["events"]
+        assert workspace["tool_calls"]
+        assert all(call["display_name"] for call in workspace["tool_calls"])
+        assert workspace["sources"]
+        assert workspace["facts"]
+        modified_change = next(
+            item for item in workspace["changes"]
+            if item["change_type"] == "MODIFIED"
+        )
+        assert "10" in modified_change["old_display_value"]
+        assert "12" in modified_change["new_display_value"]
+        assert workspace["report"]["download_url"].endswith("format=markdown")
+        message_types = {message["type"] for message in workspace["messages"]}
+        assert {
+            "USER_REQUEST", "AGENT_PLAN", "MODE_SELECTED",
+            "CHANGE_RESULT", "REPORT_RESULT", "FINAL_SUMMARY",
+        } <= message_types
+        replay_text = replay.text
+        assert "api_key" not in replay_text
+        assert "raw_html" not in replay_text
+        assert "clean_content" not in replay_text
         changes = client.get(
             f"/api/competitors/{competitor_id}/changes?change_type=MODIFIED"
         ).json()["data"]["items"]
@@ -151,6 +191,37 @@ def test_fixture_analysis_all_read_apis_and_price_change(persistence) -> None:
         assert client.get(
             f"/api/runs?competitor_id={competitor_id}"
         ).json()["data"]["items"]
+
+
+def test_workspace_historical_replay_does_not_start_analysis(persistence) -> None:
+    with persistence.transaction() as session:
+        run_id = persistence.agent_runs.create(
+            session, input_name="Replay", normalized_input="replay"
+        )
+        persistence.agent_runs.finish(
+            session, run_id, status="FAILED", current_state="FAILED",
+            error_code="FIXTURE_FAILURE", error_message="<script>alert(1)</script>",
+        )
+        before = len(
+            persistence.dashboard.list_runs(
+                session, competitor_id=None, state=None, limit=100, offset=0
+            )
+        )
+    app = create_app(settings=_settings(), persistence=persistence)
+    with TestClient(app) as client:
+        response = client.get(f"/api/workspace/runs/{run_id}")
+        workspace_html = client.get("/").text
+    assert response.status_code == 200
+    assert response.json()["data"]["messages"][-1]["type"] == "FINAL_SUMMARY"
+    assert "<script>alert(1)</script>" not in workspace_html
+    assert "textContent" in client.get("/static/app.js").text
+    with persistence.transaction() as session:
+        after = len(
+            persistence.dashboard.list_runs(
+                session, competitor_id=None, state=None, limit=100, offset=0
+            )
+        )
+    assert after == before
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,5 @@
+import json
+
 from competitive_intel.web.display import FactDisplayFormatter
 
 
@@ -39,3 +41,16 @@ def test_change_values_use_same_readable_format() -> None:
     )
     assert old == "Plus：10 USD"
     assert new == "Plus：12 USD"
+
+
+def test_price_decodes_legacy_double_encoded_json() -> None:
+    value = json.dumps(json.dumps({
+        "plan_name": "Plus",
+        "amount": "12",
+        "currency": "USD",
+        "billing_period": "MONTH",
+        "billing_unit": "USER",
+    }))
+    assert FactDisplayFormatter().format("PRICE", value) == (
+        "Plus：12 USD / 用户 / 月"
+    )
