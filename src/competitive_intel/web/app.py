@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from competitive_intel.api.router import router as api_router
+from competitive_intel.api.intelligence import router as intelligence_router
 from competitive_intel.config import Settings
 from competitive_intel.persistence import Database, Persistence
 
@@ -95,16 +96,32 @@ def create_app(
         )
 
     app.include_router(api_router)
+    app.include_router(intelligence_router)
     app.mount("/static", StaticFiles(directory=str(WEB_ROOT / "static")), name="static")
 
-    @app.get("/")
     @app.get("/workspace")
     def workspace(request: Request):
         return templates.TemplateResponse(
             request=request, name="workspace.html", context={"page": "workspace"}
         )
 
+    @app.get("/developer/runs/{run_id}")
+    def developer_run(request: Request, run_id: int):
+        return templates.TemplateResponse(request=request, name="workspace.html",
+            context={"page": "workspace", "resource_id": run_id})
+
+    @app.get("/")
+    @app.get("/signals")
+    @app.get("/analyst")
+    @app.get("/competitors")
+    @app.get("/reports")
+    def product_page(request: Request):
+        section = request.url.path.strip("/") or "command-center"
+        return templates.TemplateResponse(request=request, name="intelligence.html",
+            context={"page": section})
+
     @app.get("/dashboard")
+    @app.get("/developer")
     def home(request: Request):
         return templates.TemplateResponse(
             request=request, name="index.html", context={"page": "home"}
@@ -122,8 +139,8 @@ def create_app(
     def competitor_page(request: Request, competitor_id: int):
         return templates.TemplateResponse(
             request=request,
-            name="competitor.html",
-            context={"page": "competitor", "resource_id": competitor_id},
+            name="intelligence.html",
+            context={"page": "intelligence-profile", "resource_id": competitor_id},
         )
 
     @app.get("/reports/{report_id}")

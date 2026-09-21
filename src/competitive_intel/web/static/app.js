@@ -15,7 +15,7 @@ function metrics(target,items){target.replaceChildren();items.forEach(([label,va
 
 async function loadHome(){
   try{const h=await api("/api/health");$("health").textContent=`数据库：${h.database_status==="available"?"正常":"不可用"} · 活动任务 ${h.active_task_count}`}catch{$("health").textContent="服务状态不可用"}
-  try{const data=await api("/api/runs?limit=8");const target=$("recent-runs");target.replaceChildren();data.items.forEach(r=>target.append(listItem(r.competitor,`${r.run_mode||"待选择"} · ${stateLabels[r.final_state||r.current_state]||r.current_state}`,`/runs/${r.run_id}`,[fmtTime(r.started_at),`工具 ${r.tool_call_count}`])));if(!data.items.length)empty(target)}catch(e){empty($("recent-runs"),e.message)}
+  try{const data=await api("/api/runs?limit=8");const target=$("recent-runs");target.replaceChildren();data.items.forEach(r=>target.append(listItem(r.competitor,`${r.run_mode||"待选择"} · ${stateLabels[r.final_state||r.current_state]||r.current_state}`,`/developer/runs/${r.run_id}`,[fmtTime(r.started_at),`工具 ${r.tool_call_count}`])));if(!data.items.length)empty(target)}catch(e){empty($("recent-runs"),e.message)}
   try{const data=await api("/api/competitors?limit=12");const target=$("competitors");target.replaceChildren();data.items.forEach(c=>target.append(listItem(c.name,c.official_homepage||"尚无已验证主页",`/competitors/${c.competitor_id}`,[`来源 ${c.verified_source_count}`,`事实 ${c.current_fact_count}`])));if(!data.items.length)empty(target)}catch(e){empty($("competitors"),e.message)}
   const provider=$("search-provider"),skip=$("skip-facts"),notice=$("provider-notice");
   function mode(){const real=provider.value==="serper";skip.checked=real;skip.disabled=real;notice.textContent=real?"真实搜索与真实网页抓取；由于真实 Fact Provider 尚未接入，事实提取将强制跳过。":"Fixture 模式完全离线，适合稳定演示。";notice.className=`notice wide${real?" warn":""}`}
@@ -251,7 +251,8 @@ async function loadWorkspace(){
     const [runs,competitors]=await Promise.all([api("/api/runs?limit=50"),api("/api/competitors?limit=50")]);
     workspaceRuns=runs.items;workspaceCompetitors=competitors.items;
     renderConversationList();renderCompetitorList();
-    if(workspaceRuns.length)selectWorkspaceRun(workspaceRuns[0].run_id,true);
+    if(resourceId)selectWorkspaceRun(Number(resourceId),true);
+    else if(workspaceRuns.length)selectWorkspaceRun(workspaceRuns[0].run_id,true);
   }catch(error){$("command-feedback").textContent=error.message}
   $("workspace-search").addEventListener("input",()=>{renderConversationList();renderCompetitorList()});
   $("new-analysis").addEventListener("click",()=>openAnalysis());

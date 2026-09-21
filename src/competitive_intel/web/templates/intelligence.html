@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Competitive Intelligence — Command Center{% endblock %}
+{% block content %}
+<div class="product-head">
+  <div><p class="eyebrow">Intelligence workspace</p><h1 id="product-title">Competitive Intelligence</h1><p id="product-subtitle">Your intelligence agent · Evidence first, changes in focus.</p></div>
+  <a class="product-action" href="/analyst">Ask Analyst ↗</a>
+</div>
+<p id="product-error" class="error" role="alert" hidden></p>
+<div id="product-content" aria-live="polite"><p class="empty">Loading intelligence…</p></div>
+<noscript>This workspace requires JavaScript to display intelligence.</noscript>
+{% endblock %}

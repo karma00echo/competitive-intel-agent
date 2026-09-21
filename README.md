@@ -601,6 +601,90 @@ model API or incurs model charges. This keeps ranking, timeout, redirect,
 content-size, JavaScript-shell, validation, discovery, extraction, evidence,
 state, and tool-call results reproducible.
 
+## Phase 8.5 — Competitive Intelligence Command Center
+
+The product navigation is now intelligence-first, with a persistent desktop
+sidebar and a compact navigation on narrow screens:
+
+| Route | Product view |
+| --- | --- |
+| `/` | Command Center: metrics, Needs Attention, recent signals, competitor overview |
+| `/signals` | Paginated changes, filtered by competitor/category/type/date/verification status |
+| `/analyst` | Analyst Preview: deterministic commands only |
+| `/competitors` | Competitor library |
+| `/competitors/{id}` | Overview, Signals, Pricing, Features, Sources, History, Reports |
+| `/reports` | Report list, run status, change counts, existing Markdown downloads |
+| `/developer` | Existing developer dashboard, providers, system health and runs |
+| `/developer/runs/{id}` | Phase-eight three-column workspace replay for that run |
+
+`/workspace`, `/dashboard`, `/runs/{id}`, and `/reports/{id}` remain accessible.
+The original workspace tests remain; their homepage assertion now uses
+`/workspace`, since `/` is intentionally the product homepage.
+
+### Data definitions and boundaries
+
+- Signals are a **read-only projection of `changes`**, not another table.
+  `UNKNOWN` is presented as `UNCOMPARABLE`; unchanged records appear only in
+  History. Pricing includes PRICE/PLAN, Product includes PRODUCT_UPDATE.
+- The 30-day metric uses UTC database time. Recent Signals shows latest
+  recorded signals even when older than 30 days, with explicit dates.
+- Needs Attention counts latest-run/current-source items, not individual
+  warnings. Latest failed/warning runs, pending or missing verified sources,
+  latest uncomparable changes and missing generated reports are deterministic
+  reasons. Unlinked failed attempts are associated with a later registered
+  competitor by its existing normalized name, avoiding duplicate old alerts.
+  These are derived review items, not a new dismiss/acknowledgement workflow.
+- Last successful check is the latest completed run time (including a run
+  completed with warnings); it does not claim every source succeeded.
+- Signal status is `confirmed` or `needs_review` from stored verification and
+  comparison status. No strategic severity or model-written impact is invented.
+- Fact cards contain only current, confirmed FACT records from fact_versions
+  and product_facts. Missing facts show **No verified facts available yet.**
+  Existing fixture records remain demo data; nothing backfills real competitors.
+- Developer derives its view from runs/events/tool_calls. Agent state machine,
+  comparison, report generation, source verification and database schema are
+  unchanged. New SQL is only in the existing DashboardRepository; API handlers
+  own `Persistence.transaction()`. Presenters do not access the database.
+
+Read-only APIs added: `/api/command-center`, `/api/signals`,
+`/api/competitors/{id}/intelligence`, `/api/reports`, `/api/analyst/command`.
+List queries have bounded SQL pagination (limit <= 100, offset <= 10000).
+Profile facts support `fact_category=Pricing|Feature` before pagination;
+sources, reports, current facts and history have separate page controls.
+The competitor filter lists up to 100 competitors for this local MVP.
+DTOs allow-list fields and limit evidence to 500 characters. Raw HTML,
+configuration, secrets and stack traces are not projected. Evidence URLs strip
+userinfo/query/fragment, allow only HTTP(S), and dynamic content uses textContent,
+not innerHTML. Original stored URLs/evidence are not modified.
+
+Analyst supports `分析 <name>`, `重新分析 <name>`, `查看 <name> 最新报告`,
+`查看 <name> 最近变化`, `打开运行 <id>`, `为什么本次没有提取事实`,
+`最近有哪些变化`, `查看最近 signals`, `查看 <name> 来源`, and
+`查看 <name> 当前价格`. Analysis first asks for an explicit real-search or
+offline-demo mode, then uses the existing `POST /api/analyses` task manager.
+Unsupported commands explicitly say the natural-language Analyst is not connected.
+Real AgentProvider and real FactExtractionProvider are **not connected**.
+Real-source runs continue to skip extraction; no LLM calls were added.
+
+### Local verification (Python 3.12 environment)
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m competitive_intel.web
+# In another terminal:
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m pip check
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m pytest -p no:cacheprovider --basetemp=.pytest_tmp_stage85
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m compileall -q src scripts tests
+git diff --check
+```
+
+Open http://127.0.0.1:8000/. Verify existing Notion pricing/history/reports,
+Linear warning status and empty verified facts, Analyst controlled queries,
+and historical Developer tool traces. No live search is needed for this UI
+acceptance. Tests use the existing disposable local MySQL `_test` database,
+offline fixtures and mocks, never public internet requests. Only remove the
+resolved project-local `.pytest_tmp_stage85` after tests; old ACL-restricted
+pytest directories do not need to be touched.
+
 ## Not implemented yet
 
 - real natural-language AgentProvider and real fact-extraction model adapters

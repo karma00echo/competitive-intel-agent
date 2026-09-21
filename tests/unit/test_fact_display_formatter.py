@@ -54,3 +54,9 @@ def test_price_decodes_legacy_double_encoded_json() -> None:
     assert FactDisplayFormatter().format("PRICE", value) == (
         "Plus：12 USD / 用户 / 月"
     )
+
+
+def test_current_positioning_and_update_schema_are_human_readable():
+    formatter = FactDisplayFormatter()
+    assert formatter.format("POSITIONING", {"public_description": "Connected workspace", "target_users": []}) == "Connected workspace"
+    assert formatter.format("PRODUCT_UPDATE", {"update_title": "Enterprise search", "published_date": "2026-07-15"}) == "Enterprise search（2026-07-15）"

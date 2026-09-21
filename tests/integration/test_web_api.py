@@ -54,7 +54,7 @@ def test_app_factory_health_pages_and_static_assets(persistence) -> None:
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
             assert "<script>alert" not in response.text
-        workspace = client.get("/")
+        workspace = client.get("/workspace")
         assert "竞品情报 Agent 工作台" in workspace.text
         assert "当前仅支持分析、刷新、报告、变化和运行查询" in workspace.text
         assert "真实事实提取：未接入" in workspace.text

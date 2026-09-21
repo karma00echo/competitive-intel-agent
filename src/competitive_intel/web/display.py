@@ -49,13 +49,15 @@ class FactDisplayFormatter:
         if category == "POSITIONING" and isinstance(data, dict):
             return str(
                 data.get("positioning")
+                or data.get("public_description")
+                or data.get("primary_positioning")
                 or data.get("description")
                 or data.get("value")
                 or self._compact(data)
             )
         if category == "PRODUCT_UPDATE" and isinstance(data, dict):
-            title = data.get("title") or data.get("update_name") or self._label(fact_key)
-            date = data.get("date") or data.get("published_at")
+            title = data.get("title") or data.get("update_title") or data.get("update_name") or self._label(fact_key)
+            date = data.get("date") or data.get("published_date") or data.get("published_at")
             return f"{title}（{date}）" if date else str(title)
         if value_text:
             return value_text

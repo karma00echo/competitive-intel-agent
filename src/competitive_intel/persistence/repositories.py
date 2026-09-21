@@ -1140,6 +1140,129 @@ class ToolCallRepository:
 class DashboardRepository:
     """Bounded read models for the local API and dashboard."""
 
+    # Read-only projections: no new persisted signals or task state.
+    _INTELLIGENCE = """
+        WITH latest AS (
+            SELECT ar.id, COALESCE(ar.competitor_id, registered.id) AS competitor_id,
+                   ar.input_name, ar.normalized_input, ar.status, ar.started_at, ar.finished_at,
+                   ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(CONCAT('id:', ar.competitor_id),
+                    CONCAT('id:', registered.id), CONCAT('name:', ar.normalized_input))
+                ORDER BY ar.started_at DESC, ar.id DESC) AS rn
+            FROM agent_runs ar
+            LEFT JOIN competitors registered ON registered.normalized_name = ar.normalized_input
+        ), intelligence AS (
+            SELECT c.id AS competitor_id, COALESCE(c.canonical_name, ar.input_name) AS name,
+                   c.official_domain, ar.id AS run_id, ar.finished_at AS last_checked,
+                   ar.started_at, ar.status AS run_status,
+                   EXISTS(SELECT 1 FROM tool_calls tc WHERE tc.run_id = ar.id
+                     AND tc.tool_name = 'finalize_run_summary'
+                     AND JSON_SEARCH(tc.output_summary, 'one', 'COMPLETED_WITH_WARNINGS')
+                         IS NOT NULL) AS has_warnings,
+                   (SELECT COUNT(*) FROM sources s WHERE s.competitor_id = c.id
+                     AND s.verification_status = 'VERIFIED' AND s.is_active = TRUE) AS verified_source_count,
+                   (SELECT COUNT(*) FROM sources s WHERE s.competitor_id = c.id
+                     AND s.verification_status = 'PENDING_CONFIRMATION' AND s.is_active = TRUE) AS pending_source_count,
+                   (SELECT COUNT(*) FROM changes ch WHERE ch.run_id = ar.id
+                     AND ch.change_type = 'UNKNOWN') AS unknown_count,
+                   (SELECT COUNT(*) FROM changes ch WHERE ch.competitor_id = c.id
+                     AND ch.change_type != 'UNCHANGED'
+                     AND ch.created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY) AS signal_count,
+                   (SELECT r.id FROM reports r WHERE r.competitor_id = c.id
+                     AND r.status = 'GENERATED' ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS report_id,
+                   (ar.status = 'COMPLETED' AND NOT EXISTS(
+                     SELECT 1 FROM reports r WHERE r.run_id = ar.id AND r.status = 'GENERATED')) AS missing_report
+            FROM competitors c LEFT JOIN latest ar ON ar.competitor_id = c.id AND ar.rn = 1
+            UNION ALL
+            SELECT NULL, input_name, NULL, id, finished_at, started_at, status,
+                   FALSE, 0, 0, 0, 0, NULL, FALSE
+            FROM latest WHERE competitor_id IS NULL AND rn = 1
+        )
+    """
+    _ATTENTION = "(run_status = 'FAILED' OR has_warnings OR verified_source_count = 0 OR pending_source_count > 0 OR unknown_count > 0 OR missing_report)"
+
+    def intelligence_cards(self, session: Session, *, limit: int, offset: int,
+                           attention: bool = False, competitor_id: int | None = None) -> list[Record]:
+        where = self._ATTENTION if attention else "competitor_id IS NOT NULL"
+        if competitor_id is not None:
+            where += " AND competitor_id = :competitor_id"
+        return _all(session, self._INTELLIGENCE + f"""
+            SELECT * FROM intelligence WHERE {where}
+            ORDER BY started_at DESC, competitor_id DESC, run_id DESC LIMIT :limit OFFSET :offset
+        """, {"limit": limit, "offset": offset, "competitor_id": competitor_id})
+
+    def intelligence_metrics(self, session: Session) -> Record:
+        return _one(session, self._INTELLIGENCE + f"""
+            SELECT (SELECT COUNT(*) FROM competitors) AS competitor_count,
+              (SELECT COUNT(*) FROM changes WHERE change_type != 'UNCHANGED'
+                AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY) AS signals_30d,
+              (SELECT MAX(finished_at) FROM agent_runs WHERE status = 'COMPLETED') AS last_successful_refresh,
+              (SELECT COUNT(*) FROM intelligence WHERE {self._ATTENTION}) AS attention_count
+        """, {}) or {}
+
+    def signals(self, session: Session, *, limit: int, offset: int,
+                competitor_id: int | None = None, category: str | None = None,
+                change_type: str | None = None, start: Any = None, end: Any = None,
+                status: str | None = None, history: bool = False) -> list[Record]:
+        clauses = ["1=1" if history else "ch.change_type != 'UNCHANGED'"]
+        params = dict(limit=limit, offset=offset, competitor_id=competitor_id,
+                      category=category, change_type=change_type, start=start, end=end)
+        for value, clause in (
+            (competitor_id, "ch.competitor_id = :competitor_id"),
+            (category, "CASE UPPER(SUBSTRING_INDEX(ch.fact_key, '.', 1)) WHEN 'PRICE' THEN 'Pricing' WHEN 'PLAN' THEN 'Pricing' WHEN 'FEATURE' THEN 'Feature' WHEN 'PRODUCT_UPDATE' THEN 'Product' WHEN 'POSITIONING' THEN 'Positioning' WHEN 'WEBSITE' THEN 'Website' WHEN 'SOURCE' THEN 'Source' ELSE 'Other' END = :category"),
+            (change_type, "ch.change_type = :change_type"),
+            (start, "ch.created_at >= :start"), (end, "ch.created_at < DATE_ADD(:end, INTERVAL 1 DAY)"),
+        ):
+            if value is not None:
+                clauses.append(clause)
+        if status == "needs_review":
+            clauses.append("(ch.change_type = 'UNKNOWN' OR ch.verification_status != 'CONFIRMED')")
+        elif status == "confirmed":
+            clauses.append("ch.change_type != 'UNKNOWN' AND ch.verification_status = 'CONFIRMED'")
+        return _all(session, f"""
+            SELECT ch.id, ch.competitor_id, c.canonical_name AS name, ch.run_id,
+                   ch.change_type, ch.fact_key, ch.old_value, ch.new_value,
+                   LEFT(ch.evidence_text, 500) AS evidence_text, ch.created_at,
+                   ch.verification_status, COALESCE(n.source_url, o.source_url) AS source_url
+            FROM changes ch JOIN competitors c ON c.id = ch.competitor_id
+            LEFT JOIN product_facts n ON n.id = ch.new_fact_id
+            LEFT JOIN product_facts o ON o.id = ch.old_fact_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY ch.created_at DESC, ch.id DESC LIMIT :limit OFFSET :offset
+        """, params)
+
+    def intelligence_facts(self, session: Session, competitor_id: int, *, limit: int, offset: int,
+                           category: str | None = None) -> list[Record]:
+        return _all(session, """
+            SELECT pf.id, pf.fact_category, pf.fact_key, pf.value_text,
+                   fv.normalized_value, LEFT(pf.evidence_text, 500) AS evidence_text,
+                   pf.source_url, pf.confidence, fv.valid_from
+            FROM fact_versions fv JOIN product_facts pf ON pf.id = fv.fact_id
+            WHERE fv.competitor_id = :id AND fv.is_current = TRUE
+              AND pf.evidence_status = 'CONFIRMED' AND pf.statement_type = 'FACT'
+              AND (:category IS NULL OR (:category = 'Pricing' AND pf.fact_category IN ('PRICE', 'PLAN'))
+                   OR (:category = 'Feature' AND pf.fact_category = 'FEATURE'))
+            ORDER BY pf.fact_category, pf.id LIMIT :limit OFFSET :offset
+        """, {"id": competitor_id, "limit": limit, "offset": offset, "category": category})
+
+    def intelligence_reports(self, session: Session, *, competitor_id: int | None,
+                             limit: int, offset: int) -> list[Record]:
+        return _all(session, """
+            SELECT r.id, r.competitor_id, c.canonical_name AS name, r.run_id,
+                   r.report_type, r.status, r.generated_at,
+                   CASE WHEN ar.status = 'COMPLETED' AND EXISTS(
+                     SELECT 1 FROM tool_calls tc WHERE tc.run_id = ar.id
+                       AND tc.tool_name = 'finalize_run_summary'
+                       AND JSON_SEARCH(tc.output_summary, 'one', 'COMPLETED_WITH_WARNINGS') IS NOT NULL)
+                     THEN 'COMPLETED_WITH_WARNINGS' ELSE ar.status END AS run_status,
+                   (SELECT COUNT(*) FROM changes ch WHERE ch.run_id = r.run_id
+                     AND ch.change_type != 'UNCHANGED') AS change_count
+            FROM reports r JOIN competitors c ON c.id = r.competitor_id
+            JOIN agent_runs ar ON ar.id = r.run_id
+            WHERE (:id IS NULL OR r.competitor_id = :id)
+            ORDER BY r.generated_at DESC, r.id DESC LIMIT :limit OFFSET :offset
+        """, {"id": competitor_id, "limit": limit, "offset": offset})
+
     def ping(self, session: Session) -> bool:
         row = _one(session, "SELECT 1 AS ok", {})
         return bool(row and row["ok"] == 1)
@@ -1233,11 +1356,12 @@ class DashboardRepository:
         )
 
     def list_sources(
-        self, session: Session, competitor_id: int
+        self, session: Session, competitor_id: int, *, limit: int | None = None, offset: int = 0
     ) -> list[Record]:
+        pagination = "LIMIT :limit OFFSET :offset" if limit is not None else ""
         return _all(
             session,
-            """
+            f"""
             SELECT s.*,
                    (SELECT sn.fetch_status FROM snapshots sn
                     WHERE sn.source_id = s.id
@@ -1250,8 +1374,9 @@ class DashboardRepository:
             FROM sources s
             WHERE s.competitor_id = :competitor_id
             ORDER BY s.source_type, s.id
+            {pagination}
             """,
-            {"competitor_id": competitor_id},
+            {"competitor_id": competitor_id, "limit": limit, "offset": offset},
         )
 
     def list_reports(
