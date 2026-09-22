@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="550" height="440" viewBox="0 0 550 440">
+<defs>
+ <filter id="wash" x="-15%" y="-15%" width="130%" height="130%"><feTurbulence type="fractalNoise" baseFrequency=".028" numOctaves="3" seed="18" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="13"/><feGaussianBlur stdDeviation=".45"/></filter>
+ <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency=".35" numOctaves="3" seed="5" result="grain"/><feColorMatrix in="grain" type="saturate" values="0"/><feComposite in2="SourceGraphic" operator="in"/><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+ <linearGradient id="leaf" x2="1" y2=".7"><stop stop-color="#84916e"/><stop offset=".6" stop-color="#a0aa83"/><stop offset="1" stop-color="#697e61"/></linearGradient>
+</defs>
+<g filter="url(#wash)" opacity=".57"><path d="M85 151C63 100 157 103 199 75S294 67 324 108s115 22 144 85-7 153-98 176-153-6-229-24S59 205 85 151" fill="#eae8db"/><path d="M111 137C108 60 186 9 269 25s121 64 130 135-30 137-115 167-181-70-173-190" fill="#dce5e7"/><path d="M197 170c33-42 100-32 141 12s87 73 67 119-83 48-138 17-99-106-70-148" fill="#b7c2a3"/><path d="M105 267c-45 33-29 98 81 96l178-22c53-29 60-49 6-71s-127 5-179-7-56-12-86 4" fill="#e7e5cf"/></g>
+<path d="M81 260c-24-77 17-153 85-166s133 15 142 77-34 119-97 152-121 20-153 7" fill="none" stroke="#9da78d" stroke-width="1" opacity=".7"/>
+<g filter="url(#paper)" opacity=".79" fill="url(#leaf)">
+<path d="M329 331c3-42 53-63 101-78-11 37-56 62-101 78"/>
+<path d="M355 296c-31-34-48-93-36-137 30 28 49 88 36 137"/>
+<path d="M361 277c15-54 58-70 89-98-3 39-47 84-89 98"/>
+<path d="M377 240c-28-38-40-93-31-135 27 27 49 78 31 135"/>
+<path d="M385 207c9-53 39-72 42-112 20 38-5 84-42 112"/>
+<path d="M386 154c-25-43-19-93-1-127 13 36 28 84 1 127"/>
+<path d="M292 358c37-32 82-28 128-49-21 36-79 53-128 49"/>
+</g>
+<g fill="none" stroke="#84916e" stroke-linecap="round"><path d="M220 399c128-34 192-178 166-324" stroke-width="2" opacity=".9"/><path d="m329 331 80-66m-54 31-30-116m36 97 69-78m-53 41-27-115m35 82 38-92m-37 39-1-106m-93 310 103-37" stroke-width=".7" opacity=".62"/></g>
+</svg>

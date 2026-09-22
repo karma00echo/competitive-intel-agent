@@ -1,5 +1,27 @@
 # Visual exploration only
 
+## Selected editorial homepage
+
+The reference-led homepage lives at **http://127.0.0.1:8010/final-editorial-demo/**
+when served using the command below. It is isolated from the production homepage.
+
+`final-editorial-demo/content.js` contains replaceable mock navigation, cards,
+competitor records, signals, report outlines, and suggestions. `theme.css` controls
+the reference-inspired warm paper / sage design. Local SVG illustrations require
+no external fonts, image services, or network requests.
+
+Navigation opens local preview panels; search finds demo sections and companies;
+suggestions fill the analyst input; submission shows a research outline only.
+Web search and Evidence are preview preferences, not live integrations. Export
+downloads a clearly labeled sample Markdown brief. Ctrl/Cmd+K focuses search,
+Ctrl/Cmd+Enter submits the preview, Alt+N starts a new input, and Escape closes
+search results and the mobile navigation. No database or API is accessed.
+
+Future changes can replace content, connect approved data, or tune typography,
+illustrations and density without changing the other four demos.
+
+## Earlier visual explorations
+
 Four static demos share one dataset, renderer and set of interactions. Only CSS differs.
 No application modules, APIs, databases or AgentRunner are used or modified.
 All displayed records are synthetic design fixtures, not current product intelligence.

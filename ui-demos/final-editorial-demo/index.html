@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f7f3">
+  <title>Intelligence Workspace · Editorial Demo</title>
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="#home" aria-label="Intelligence workspace home"><span class="brand-mark">—</span><span>FIELDNOTES<span class="brand-sub">COMPETITIVE INTELLIGENCE</span></span></a>
+      <button class="new-button" id="new"><span class="new-plus">+</span>New analysis<kbd>Alt N</kbd></button>
+      <nav id="primary-nav" aria-label="Main"></nav>
+      <div class="nav-group"><h2>Workspace</h2><nav id="workspace-nav" aria-label="Workspace"></nav></div>
+      <div class="nav-group"><h2>Tools</h2><nav id="tools-nav" aria-label="Tools"></nav></div>
+      <div class="landscape-card"><div>See the signals.<br>Find your<br>perspective.</div><span>—</span></div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menu" aria-label="Toggle navigation" aria-expanded="false"><span data-icon="menu"></span></button>
+        <div class="search-wrap"><span data-icon="search"></span><input id="search" type="search" placeholder="Search this workspace..." aria-label="Search demo workspace"><kbd>Ctrl K</kbd><div id="search-results" class="search-results" hidden></div></div>
+        <nav class="top-nav" aria-label="Top navigation"><a href="#home" class="active">Home</a><a href="#reports">Library</a><a href="#competitors">Companies</a></nav>
+        <div class="account"><button class="icon-button" id="notifications" aria-label="View notifications"><span data-icon="bell"></span></button><button class="avatar" id="profile" aria-label="Workspace information">CI</button></div>
+      </header>
+      <main id="main">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy"><p class="eyebrow">A CLEARER VIEW OF YOUR MARKET</p><h1 id="hero-title">Your competitors,<br>a clearer perspective.</h1><p class="hero-subtitle">A calm workspace for tracking changes, reviewing evidence,<br class="desktop-break"> and turning competitive signals into understanding.</p></div>
+          <img class="botanical" src="botanical.svg" alt="" aria-hidden="true"><div class="hero-note">SMALL SIGNALS<br>CLEARER THINKING<br>BETTER DECISIONS<span>—</span></div>
+        </section>
+        <section id="cards" class="cards" aria-label="Start exploring"></section>
+        <section class="composer-section" aria-label="Ask your analyst">
+          <form id="analyst-form" class="composer">
+            <label class="sr-only" for="query">Product name or analysis question</label>
+            <textarea id="query" placeholder="Enter a product name, or ask about a competitor..." maxlength="2000" required></textarea>
+            <span class="send-hint">Ctrl ↵ to send</span>
+            <div class="composer-bottom"><div class="query-options"><button type="button" class="chip" id="web-toggle" aria-pressed="true"><span data-icon="globe"></span>Web search</button><button type="button" class="chip" id="evidence-toggle" aria-pressed="true"><span data-icon="book"></span>Evidence</button><label class="chip select-chip"><span data-icon="sliders"></span><span class="sr-only">Analysis focus</span><select id="focus"><option>Overview</option><option>Pricing</option><option>Product changes</option></select></label><label class="chip select-chip length-chip"><span data-icon="text"></span><span class="sr-only">Summary length</span><select id="length"><option>Brief</option><option>Detailed</option></select></label></div><button type="submit" class="send" aria-label="Preview analysis"><span data-icon="arrow-up"></span></button></div>
+          </form><div class="composer-caption"><span class="status-dot"></span>Design preview · Sample content only<span>No live research is started</span></div>
+        </section>
+        <section class="suggestions" aria-labelledby="suggestions-title"><div class="section-line"><h2 id="suggestions-title">Suggestions for you</h2><span></span><button id="more">See more <span data-icon="arrow-right"></span></button></div><div id="suggestion-list" class="suggestion-list"></div></section>
+        <section id="detail" class="detail" aria-labelledby="detail-title" tabindex="-1" hidden><div class="detail-heading"><div><p class="eyebrow">WORKSPACE PREVIEW</p><h2 id="detail-title"></h2></div><button class="icon-button" id="close-detail" aria-label="Close preview"><span data-icon="close"></span></button></div><div id="detail-content"></div></section>
+        <footer>Universal Competitive Intelligence Agent<span>Observe thoughtfully. Decide with clarity.</span></footer>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="content.js"></script><script src="app.js"></script>
+</body>
+</html>
