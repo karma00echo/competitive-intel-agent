@@ -1,11 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Competitive Intelligence — Command Center{% endblock %}
 {% block content %}
+{% if page == 'command-center' %}
+<section class="ed-hero" aria-labelledby="product-title">
+  <div class="ed-hero-copy"><p class="ed-eyebrow">A CLEARER VIEW OF YOUR MARKET</p>
+    <h1 id="product-title">Your competitors,<br>a clearer perspective.</h1>
+    <p id="product-subtitle">Track what changes. Understand the evidence.<br>Build a clearer view of the products that matter.</p>
+  </div>
+  <img src="{{ url_for('static', path='/editorial/botanical.svg') }}" alt="" aria-hidden="true" class="ed-botanical">
+  <div class="ed-hero-note" aria-hidden="true">SMALL SIGNALS<br>CLEARER THINKING<br>BETTER DECISIONS<span>—</span></div>
+</section>
+<section class="ed-entry-grid" aria-label="Explore competitive intelligence">
+  {% for href, symbol, title, description in [('/competitors', 'reports', 'Track Competitors', 'Follow the products that matter. Keep their sources and facts in view.'), ('/signals', 'search', 'Review Signals', 'Explore changes in products, pricing and positioning — with evidence.'), ('/reports', 'analyst', 'Analyze Reports', 'Read saved findings and trace each conclusion to its source.')] %}
+  <a class="ed-entry" href="{{ href }}"><span class="ed-entry-icon">{{ icon(symbol) }}</span><h2>{{ title }}</h2><p>{{ description }}</p><span class="ed-entry-arrow">{{ icon('arrow') }}</span></a>
+  {% endfor %}
+</section>
+{% else %}
 <div class="product-head">
   <div><p class="eyebrow">Intelligence workspace</p><h1 id="product-title">Competitive Intelligence</h1><p id="product-subtitle">Your intelligence agent · Evidence first, changes in focus.</p></div>
   <a class="product-action" href="/analyst">Ask Analyst ↗</a>
 </div>
+{% endif %}
 <p id="product-error" class="error" role="alert" hidden></p>
 <div id="product-content" aria-live="polite"><p class="empty">Loading intelligence…</p></div>
+{% if page == 'command-center' %}
+<section class="ed-analyst-entry" aria-labelledby="ed-analyst-title">
+  <p class="ed-eyebrow">CONTINUE WITH YOUR ANALYST</p>
+  <a href="/analyst"><span><h2 id="ed-analyst-title">Start with a competitor name.</h2><p>Open the existing Analyst to analyze a product or query saved intelligence.</p></span><span class="ed-send">{{ icon('arrow') }}</span></a>
+  <small>Deterministic commands only. Real natural-language AgentProvider and fact extraction are not connected.</small>
+</section>
+{% endif %}
 <noscript>This workspace requires JavaScript to display intelligence.</noscript>
 {% endblock %}

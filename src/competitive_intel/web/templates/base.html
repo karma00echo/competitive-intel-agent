@@ -1,3 +1,6 @@
+{% from "editorial_icons.html" import icon %}
+{% set active = 'competitors' if page == 'intelligence-profile' else 'reports' if page == 'report' else 'developer' if page in ['home', 'workspace', 'run'] else page %}
+{% set labels = {'command-center': 'Command Center', 'signals': 'Signals', 'analyst': 'Analyst', 'competitors': 'Competitors', 'reports': 'Reports', 'developer': 'Developer'} %}
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -7,21 +10,26 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=12">
   <link rel="stylesheet" href="{{ url_for('static', path='/workspace.css') }}?v=12">
   <link rel="stylesheet" href="{{ url_for('static', path='/intelligence.css') }}?v=85">
+  <link rel="stylesheet" href="{{ url_for('static', path='/editorial.css') }}?v=86">
 </head>
 <body data-page="{{ page }}" data-resource-id="{{ resource_id|default('') }}">
-  <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">CI</span>Competitive<br>Intelligence</a>
-    <nav class="topnav" aria-label="Main navigation">
-      <a href="/" {% if page == 'command-center' %}aria-current="page"{% endif %}>Command Center</a>
-      <a href="/signals" {% if page == 'signals' %}aria-current="page"{% endif %}>Signals</a>
-      <a href="/analyst" {% if page == 'analyst' %}aria-current="page"{% endif %}>Analyst <small>Preview</small></a>
-      <a href="/competitors" {% if page in ['competitors', 'intelligence-profile'] %}aria-current="page"{% endif %}>Competitors</a>
-      <a href="/reports" {% if page in ['reports', 'report'] %}aria-current="page"{% endif %}>Reports</a>
-      <a href="/developer" {% if page in ['home', 'workspace', 'run'] %}aria-current="page"{% endif %}>Developer</a>
+  <a class="ed-skip" href="#main-content">Skip to content</a>
+  <aside class="ed-sidebar">
+    <a class="ed-brand" href="/"><span>—</span><div>COMPETITIVE INTELLIGENCE<small>OBSERVE · VERIFY · UNDERSTAND</small></div></a>
+    <a class="ed-new" href="/analyst"><span>+</span>New analysis {{ icon('arrow') }}</a>
+    <nav class="ed-nav" aria-label="Main navigation">
+      {% for key, href, symbol in [('command-center', '/', 'home'), ('signals', '/signals', 'signals'), ('analyst', '/analyst', 'analyst'), ('competitors', '/competitors', 'competitors'), ('reports', '/reports', 'reports'), ('developer', '/developer', 'developer')] %}
+      <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ icon(symbol) }}<span>{{ labels[key] }}</span></a>
+      {% endfor %}
     </nav>
-    <span class="badge">本地控制台</span>
+    <div class="ed-landscape" aria-hidden="true">See the signals.<br>Find your<br>perspective.<span>—</span></div>
+    <p class="ed-local">Local workspace · Evidence first</p>
+  </aside>
+  <header class="ed-topbar">
+    <div>Intelligence workspace <span>/</span> <strong>{{ labels.get(active, 'Workspace') }}</strong></div>
+    <a href="/analyst">Open Analyst {{ icon('arrow') }}</a>
   </header>
-  <main class="shell">{% block content %}{% endblock %}</main>
+  <main class="shell" id="main-content">{% block content %}{% endblock %}</main>
   <script src="{{ url_for('static', path='/app.js') }}?v=12" defer></script>
   <script src="{{ url_for('static', path='/intelligence.js') }}?v=85" defer></script>
 </body>
