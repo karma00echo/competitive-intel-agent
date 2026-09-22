@@ -107,8 +107,8 @@ def create_app(
 
     @app.get("/developer/runs/{run_id}")
     def developer_run(request: Request, run_id: int):
-        return templates.TemplateResponse(request=request, name="workspace.html",
-            context={"page": "workspace", "resource_id": run_id})
+        return templates.TemplateResponse(request=request, name="audit.html",
+            context={"page": "audit", "resource_id": run_id})
 
     @app.get("/")
     @app.get("/analyst")
@@ -138,8 +138,8 @@ def create_app(
     def run_page(request: Request, run_id: int):
         return templates.TemplateResponse(
             request=request,
-            name="run.html",
-            context={"page": "run", "resource_id": run_id},
+            name="audit.html",
+            context={"page": "audit", "resource_id": run_id},
         )
 
     @app.get("/competitors/{competitor_id}")

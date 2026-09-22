@@ -745,6 +745,31 @@ refresh and back/forward without new runs; test an unknown product, unsupported
 comparison, failed run, and the six sidebar destinations. Keep the production
 database free of new acceptance-test fixture facts.
 
+## Editorial data-page migration
+
+Signals, Competitors (including profiles), Reports (including reading pages),
+and Developer now share a scoped warm-paper / sage editorial stylesheet.
+The Chat-first homepage and its runner interactions are unchanged.
+
+- `/developer` prioritizes paginated real run history (20 per page). Advanced
+  launch settings and competitor links remain available in disclosure panels.
+- `/developer/runs/{id}` and the legacy `/runs/{id}` show the same execution
+  audit: recorded timeline, expandable tool inputs/outputs, provider settings,
+  warnings/errors, evidence, changes and report links. `/workspace` remains
+  available as the original three-column interface.
+- Audit data comes from the existing `/api/workspace/runs/{id}` projection;
+  API limits and sanitization still apply. Current source records are explicitly
+  distinguished from run-specific facts. Older runs lacking provider metadata
+  are not assumed to be real research merely because an API default is present.
+- Signals filtering, profile tabs, report reading/download and all API,
+  repository, schema and AgentRunner contracts are unchanged. No mock data was
+  introduced. The new audit controller only performs read-only requests.
+
+Run regression tests using the project Python 3.12 interpreter and
+`-m pytest -p no:cacheprovider --basetemp=.pytest_tmp_ui`. Browser checks cover
+real history, expanded tools, filtered signals, reports, failed runs and narrow
+viewports. This phase does not start Stage 9.
+
 ## Not implemented yet
 
 - real natural-language AgentProvider and real fact-extraction model adapters

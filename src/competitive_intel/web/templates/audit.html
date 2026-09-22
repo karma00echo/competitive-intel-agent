@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Developer — Execution audit{% endblock %}
+{% block content %}
+<a class="back" href="/developer">← 运行历史</a>
+<header class="product-head"><div><p class="eyebrow">Execution audit</p><h1 id="audit-title">读取运行记录…</h1><p id="audit-subtitle">仅展示已保存的执行事件，不生成模拟步骤。</p></div><span id="audit-state" class="status"></span></header>
+<p id="audit-error" class="error" role="alert" hidden></p><button id="audit-retry" type="button" hidden>重新读取</button>
+<section id="audit-provider" class="audit-provider" aria-label="Provider 配置"></section>
+<div id="audit-links" class="card-actions"></div>
+<section id="audit-warnings" aria-label="警告与错误"></section>
+<div class="audit-columns">
+  <section class="audit-timeline"><div class="section-title"><h2>执行时间线</h2><span class="eyebrow">Recorded events</span></div><div id="audit-events"></div></section>
+  <section><div class="section-title"><h2>工具轨迹</h2><span class="eyebrow">Inputs & outputs</span></div><div id="audit-tools"></div></section>
+</div>
+<section class="product-section"><div class="section-title"><h2>来源与证据</h2></div><p class="muted">来源列表为当前档案；事实证据属于本次运行。完整记录可在下方展开。</p><div id="audit-evidence"></div></section>
+<section class="product-section"><div class="section-title"><h2>运行结果</h2></div><div id="audit-result"></div></section>
+{% endblock %}

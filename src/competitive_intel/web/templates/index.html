@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}竞品情报控制台{% endblock %}
 {% block content %}
-<section class="hero">
+<section class="product-head">
+  <div>
   <p class="eyebrow">Developer / Audit mode</p>
-  <h1>运行与能力审计</h1>
-  <p>Provider 配置、受控分析和历史记录。<a href="/workspace">打开三栏 Agent Workspace</a></p>
+  <h1>Developer</h1>
+  <p>每一次执行，都有可追溯的记录。检查状态、工具与证据，不替代正式研究结论。</p>
+  </div><a class="product-action" href="/workspace">打开三栏 Agent Workspace →</a>
 </section>
-<section class="panel">
+<section class="audit-ledger"><div class="section-head"><div><p class="eyebrow">Execution ledger</p><h2>运行历史</h2></div><span id="health" role="status"></span></div><div id="audit-history" aria-live="polite"></div><div class="pager"><button id="audit-prev" type="button">上一页</button><span id="audit-page"></span><button id="audit-next" type="button">下一页</button></div></section>
+<div id="recent-runs" hidden></div>
+<details class="panel audit-launch"><summary>高级运行配置 · 启动受控分析</summary>
+<p class="muted">普通分析请使用首页对话。这里保留诊断用 Provider 与 Fixture 配置。</p>
   <form id="analysis-form" class="analysis-form">
     <label class="wide">竞品名称<input id="competitor-name" maxlength="120" required placeholder="Notion、飞书或 Linear"></label>
     <label>语言<select id="language"><option value="en">English</option><option value="zh">中文</option></select></label>
@@ -17,9 +22,6 @@
     <button class="primary wide" type="submit">开始分析</button>
     <p id="form-error" class="error wide" hidden></p>
   </form>
-</section>
-<section class="grid two">
-  <div class="panel"><div class="section-head"><h2>最近运行</h2><span id="health"></span></div><div id="recent-runs" class="list"></div></div>
-  <div class="panel"><div class="section-head"><h2>竞品档案</h2></div><div id="competitors" class="list"></div></div>
-</section>
+</details>
+<details class="panel"><summary>关联竞品档案</summary><div id="competitors" class="list"></div></details>
 {% endblock %}
