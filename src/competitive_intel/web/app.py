@@ -111,8 +111,15 @@ def create_app(
             context={"page": "workspace", "resource_id": run_id})
 
     @app.get("/")
-    @app.get("/signals")
     @app.get("/analyst")
+    @app.get("/history")
+    def chat_page(request: Request):
+        section = "history" if request.url.path == "/history" else "chat"
+        return templates.TemplateResponse(request=request, name="chat.html",
+            context={"page": section})
+
+    @app.get("/command-center")
+    @app.get("/signals")
     @app.get("/competitors")
     @app.get("/reports")
     def product_page(request: Request):

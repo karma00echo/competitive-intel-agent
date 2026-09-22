@@ -1,7 +1,6 @@
 /* Product views are DOM/textContent projections, never HTML from evidence. */
 (() => {
   const root = $("product-content");
-  if (!root) return;
   const title = (heading, subtitle) => { $("product-title").textContent = heading; $("product-subtitle").textContent = subtitle; };
   const fail = error => { $("product-error").hidden = false; $("product-error").textContent = error.message; };
   const safe = fn => (...args) => Promise.resolve(fn(...args)).catch(fail);
@@ -166,39 +165,9 @@
     names.forEach(name=>{const button=node("button",name);button.setAttribute("role","tab");button.addEventListener("click",safe(()=>select(name)));tabs.append(button)});
     await select(names.find(name=>`#${name.toLowerCase()}`===location.hash)||"Overview");
   }
-  async function analystPage() {
-    title("Analyst Preview", "A controlled entry point to your intelligence workspace.");
-    const box=node("div",undefined,"analyst-chat"), notice=node("div",undefined,"analyst-notice"), thread=node("div",undefined,"analyst-thread"),form=node("form",undefined,"analyst-form"),input=node("input"),send=node("button","Send");
-    notice.textContent="Current version can answer only deterministic workspace queries. Natural-language AgentProvider is not connected yet. Real FactExtractionProvider is not connected; real-source runs skip fact extraction.";
-    input.placeholder="查看 Notion 最近变化";input.maxLength=250;input.required=true;input.setAttribute("aria-label","Analyst command");send.type="submit";form.append(input,send);
-    const examples=node("div",undefined,"analyst-examples");
-    for(const text of ["最近有哪些变化","查看 Notion 当前价格","为什么本次没有提取事实"]){const button=node("button",text);button.addEventListener("click",()=>{input.value=text;input.focus()});examples.append(button)}
-    box.append(notice,examples,thread,form);root.replaceChildren(box);
-    form.addEventListener("submit",safe(async event=>{
-      event.preventDefault();send.disabled=true;
-      const question=input.value;input.value="";thread.append(node("div",question,"analyst-message user"));
-      const answer=node("div",undefined,"analyst-message");thread.append(answer);
-      try {
-        const command=await api(`/api/analyst/command?text=${encodeURIComponent(question)}`);
-        if(command.action==="unsupported"){answer.textContent=command.message;return}
-        if(command.action==="capability"){answer.textContent="真实 FactExtractionProvider 尚未接入。真实网页不会使用 Fixture 事实。具体运行是否跳过，请在 Developer 中查看该次运行的 fact_extraction_status。";return}
-        if(command.action==="run"){const run=await api(`/api/runs/${command.run_id}`);answer.append(link(`${run.competitor} · ${run.final_state||run.current_state}`,`/developer/runs/${command.run_id}`));return}
-        if(command.action==="analyze"){
-          answer.append(node("p",`Analyze ${command.name}. Choose the data mode explicitly before starting.`));
-          const mode=node("select");for(const [value,label] of [["serper","Real search · fact extraction skipped"],["fixture","Offline demonstration · fixture data"]]){const option=node("option",label);option.value=value;mode.append(option)}
-          const start=node("button","Start analysis");answer.append(mode,start);
-          start.addEventListener("click",safe(async()=>{start.disabled=true;try{const accepted=await api("/api/analyses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({competitor_name:command.name,search_provider:mode.value,skip_fact_extraction:mode.value==="serper",max_tool_calls:20})});answer.append(link("View running analysis →",`/developer/runs/${accepted.run_id}`));}catch(error){start.disabled=false;throw error}}));return;
-        }
-        let competitor=null;
-        if(command.name){const data=await api(`/api/competitors?search=${encodeURIComponent(command.name)}&limit=100`);competitor=data.items.find(item=>[item.name,item.normalized_name].some(value=>value.toLowerCase()===command.name.toLowerCase()));if(!competitor){answer.textContent="未找到该竞品档案。";return}}
-        if(command.action==="signals"){const data=await api(`/api/signals?limit=5${competitor?`&competitor_id=${competitor.competitor_id}`:""}`);fill(answer,data.items,signalCard);answer.append(link("All matching signals →",`/signals${competitor?`?competitor_id=${competitor.competitor_id}`:""}`));return}
-        const data=await api(`/api/competitors/${competitor.competitor_id}/intelligence?limit=100`);
-        if(command.action==="pricing")fill(answer,data.facts.filter(f=>["PRICE","PLAN"].includes(f.category)),factCard,"No verified facts available yet.");
-        if(command.action==="sources")fill(answer,data.sources,sourceCard);
-        if(command.action==="report")fill(answer,data.reports.slice(0,1),reportCard,"该竞品尚无正式报告。");
-      } finally {send.disabled=false;}
-    }));
-  }
-  const loaders={"command-center":commandCenter,signals:signalsPage,competitors:competitorsPage,reports:reportsPage,"intelligence-profile":profilePage,analyst:analystPage};
+  // Shared evidence renderers: chat queries use the same product projections.
+  window.IntelligenceViews = {fill, signalCard, factCard, sourceCard, reportCard};
+  if (!root) return;
+  const loaders={"command-center":commandCenter,signals:signalsPage,competitors:competitorsPage,reports:reportsPage,"intelligence-profile":profilePage};
   if(loaders[page])safe(loaders[page])();
 })();

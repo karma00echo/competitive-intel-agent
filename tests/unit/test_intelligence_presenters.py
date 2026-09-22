@@ -28,6 +28,11 @@ def test_signal_projection(kind):
     ("最近有哪些变化","signals"), ("查看最近 signals","signals"),
     ("查看 Notion 来源","sources"), ("查看 Notion 当前价格","pricing"),
     ("预测三年后市场格局","unsupported"),
+    ("帮我分析 Notion 这个产品。", "analyze"),
+    ("Notion", "analyze"), ("飞书", "analyze"),
+    ("查看 Linear 最近发生了哪些变化。", "signals"),
+    ("比较 Notion 和 Asana 的定价及功能。", "unsupported"),
+    ("随便聊聊", "unsupported"),
 ])
 def test_analyst_grammar(text, action):
     assert parse_analyst_command(text)["action"] == action

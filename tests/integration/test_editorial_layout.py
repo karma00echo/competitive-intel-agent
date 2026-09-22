@@ -9,7 +9,7 @@ from test_web_api import _settings
 
 
 def test_editorial_shell_uses_real_routes_without_home_append(persistence):
-    routes = ["/", "/signals", "/analyst", "/competitors", "/reports", "/developer"]
+    routes = ["/", "/history", "/competitors", "/signals", "/reports", "/command-center", "/analyst", "/developer"]
     with TestClient(create_app(settings=_settings(), persistence=persistence)) as client:
         for route in routes:
             response = client.get(route)
@@ -17,11 +17,11 @@ def test_editorial_shell_uses_real_routes_without_home_append(persistence):
             soup = BeautifulSoup(response.text, "html.parser")
             links = soup.select('.ed-nav a')
             assert [a['href'] for a in links] == routes
-            assert [a['href'] for a in links if a.get('aria-current') == 'page'] == [route]
-            assert bool(soup.select('.ed-hero')) == (route == '/')
+            assert [a['href'] for a in links if a.get('aria-current') == 'page'] == ['/' if route == '/analyst' else route]
+            assert bool(soup.select('.ed-hero')) == (route in ['/', '/analyst', '/command-center'])
             assert not soup.select('#detail')
             assert 'content.js' not in response.text
-        home = BeautifulSoup(client.get('/').text, 'html.parser')
+        home = BeautifulSoup(client.get('/command-center').text, 'html.parser')
         assert [a['href'] for a in home.select('.ed-entry')] == ['/competitors', '/signals', '/reports']
         assert home.select_one('.ed-analyst-entry a')['href'] == '/analyst'
         assert home.select_one('#product-content')

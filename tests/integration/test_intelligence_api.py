@@ -15,7 +15,7 @@ def test_command_center_empty_and_navigation(persistence):
             for label in ["Command Center", "Signals", "Analyst", "Competitors", "Reports", "Developer"]:
                 assert label in page.text
         home=client.get("/").text
-        assert "Fixture" not in home and "stage_events" not in home
+        assert "chat-input" in home and "stage_events" not in home
         assert "竞品情报 Agent 工作台" in client.get("/workspace").text
         assert "textContent" in client.get("/static/intelligence.js").text
         assert "innerHTML" not in client.get("/static/intelligence.js").text

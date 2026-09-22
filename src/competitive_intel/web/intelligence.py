@@ -89,18 +89,23 @@ class CompetitorProfilePresenter:
 def parse_analyst_command(text):
     """Grammar only: dispatch to existing APIs, never an open-ended model."""
     import re
-    text = text.strip()
+    text = text.strip().rstrip("。！？!?")
     if text in {"最近有哪些变化", "查看最近 signals"}:
         return {"action": "signals"}
     if re.fullmatch(r"为什么本次没有提取事实[？?]?", text):
         return {"action": "capability"}
-    match = re.fullmatch(r"(分析|重新分析)\s+(.+)", text)
+    # Deliberately bounded grammar, shared by Analyst and the chat homepage.
+    if re.search(r"比较|对比|预测|随便|聊聊|compare|predict", text, re.I):
+        return {"action": "unsupported", "message": "暂不支持自由多轮推理或跨竞品比较。可输入：分析 Notion、查看 Linear 最近变化、查看 Notion 当前价格。"}
+    match = re.fullmatch(r"(?:帮我|请)?(?:重新分析|分析)\s*(.+?)(?:\s*这个产品)?", text)
     if match:
-        return {"action": "analyze", "name": match[2]}
+        return {"action": "analyze", "name": match[1]}
     match = re.fullmatch(r"打开运行\s+(\d+)", text)
     if match:
         return {"action": "run", "run_id": int(match[1])}
-    match = re.fullmatch(r"查看\s+(.+?)\s+(最新报告|最近变化|来源|当前价格)", text)
+    match = re.fullmatch(r"查看\s*(.+?)\s*(最新报告|最近变化|最近发生了哪些变化|来源|当前价格)", text)
     if match:
-        return {"action": {"最新报告": "report", "最近变化": "signals", "来源": "sources", "当前价格": "pricing"}[match[2]], "name": match[1]}
+        return {"action": {"最新报告": "report", "最近变化": "signals", "最近发生了哪些变化": "signals", "来源": "sources", "当前价格": "pricing"}[match[2]], "name": match[1]}
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]*(?: [A-Za-z0-9][A-Za-z0-9.+-]*){0,2}|[\u4e00-\u9fff]{2,12}", text) and not re.search(r"查看|为什么|如何|帮我|请|分析|什么", text):
+        return {"action": "analyze", "name": text}
     return {"action": "unsupported", "message": "Natural-language Analyst is not connected yet."}

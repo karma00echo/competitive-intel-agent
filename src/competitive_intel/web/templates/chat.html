@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Competitive Intelligence — Agent{% endblock %}
+{% block content %}
+{% if page == 'history' %}
+<section class="chat-history"><p class="ed-eyebrow">YOUR INTELLIGENCE TRAIL</p><h1>History</h1>
+<p>对话保存在本浏览器；运行记录保存在系统数据库。不会自动重启历史任务。</p>
+<h2>本浏览器对话</h2><div id="chat-history"></div>
+<h2>系统运行记录</h2><div id="chat-runs"></div><button id="chat-more" type="button">加载更多运行</button></section>
+{% else %}
+<div id="chat-welcome">
+  <section class="ed-hero"><div class="ed-hero-copy"><p class="ed-eyebrow">A CLEARER VIEW OF YOUR MARKET</p>
+  <h1>Your competitors,<br>a clearer perspective.</h1><p>Start with a name. Follow the evidence.<br>让竞品研究，从一次对话开始。</p></div>
+  <img class="ed-botanical" src="{{ url_for('static', path='/editorial/botanical.svg') }}" alt="" aria-hidden="true"></section>
+</div>
+<section id="chat-conversation" aria-label="Agent conversation" hidden>
+  <div class="chat-heading"><div><p class="ed-eyebrow">COMPETITIVE INTELLIGENCE AGENT</p><h1>Follow the evidence.</h1></div><a href="/">New analysis →</a></div>
+  <div id="chat-thread" aria-live="polite" aria-relevant="additions"></div>
+</section>
+<form id="chat-form" class="chat-composer">
+  <label for="chat-input">Product name or analysis request</label>
+  <textarea id="chat-input" maxlength="250" rows="3" required placeholder="输入竞品名称，或试试：帮我分析 Notion 这个产品。"></textarea>
+  <div class="chat-composer-bottom"><span>受控命令 · 无自由多轮推理 · Ctrl / ⌘ + Enter</span><button type="submit" id="chat-send" aria-label="发送消息">{{ icon('arrow') }}</button></div>
+</form>
+<p id="chat-error" role="alert" hidden></p>
+<p class="chat-limit">支持分析、变化、价格、来源和报告查询。真实搜索跳过尚未接入的事实提取；跨竞品自然语言比较暂不支持。演示模式需明确确认。</p>
+<section id="chat-shortcuts" class="ed-entry-grid" aria-label="Quick tasks">
+{% for prompt, symbol, title, description in [('分析 ', 'competitors', 'Track Competitors', '建立竞品档案 · 输入产品名后确认启动'), ('最近有哪些变化', 'search', 'Review Signals', '查看已有产品、功能和定价变化'), ('查看 ', 'analyst', 'Analyze Competitors', '查询已有价格、来源与报告 · 暂不支持跨竞品推理')] %}
+<button type="button" class="ed-entry" data-prompt="{{ prompt }}"><span class="ed-entry-icon">{{ icon(symbol) }}</span><h2>{{ title }}</h2><p>{{ description }}</p></button>
+{% endfor %}
+</section>
+{% endif %}
+<noscript>此对话界面需要 JavaScript；现有正式数据页面仍可从侧栏访问。</noscript>
+{% endblock %}

@@ -685,6 +685,66 @@ offline fixtures and mocks, never public internet requests. Only remove the
 resolved project-local `.pytest_tmp_stage85` after tests; old ACL-restricted
 pytest directories do not need to be touched.
 
+## Stage 8.7 — Chat-first homepage
+
+Open **http://127.0.0.1:8000/** after starting the existing web service.
+The Editorial welcome screen now has a real multiline composer. Sending a
+message replaces the welcome screen with a conversation, not an appended demo.
+`/analyst` uses the same controller and existing `/api/analyst/command` grammar.
+The former homepage and all its live metrics remain at `/command-center`.
+`/signals`, `/competitors`, `/reports`, `/developer`, and run/report detail
+routes are preserved. No schema, repository, AgentRunner, extraction, comparison,
+or report-generation changes were made in this phase.
+
+Supported examples:
+
+- `Notion` or `帮我分析 Notion 这个产品。`
+- `查看 Linear 最近发生了哪些变化。`
+- `查看 Notion 当前价格` / `查看 Notion 来源` / `查看 Notion 最新报告`
+- `最近有哪些变化` / `打开运行 123` / `为什么本次没有提取事实`
+
+Analysis requires an explicit in-chat confirmation of **real Serper search**
+or **Fixture offline demonstration**. The existing `POST /api/analyses` starts
+the actual controlled runner; no Developer form or simulated task is used.
+Real mode skips fact extraction. Fixture mode writes fixed demo records and
+must not be interpreted as current competitive research. Existing-record queries
+also warn that the database can contain demo records. No external search is
+started by loading a page, choosing a shortcut, or replaying a conversation.
+
+Run cards poll the existing workspace projection, show only recorded stages and
+tools, and link to reports, competitor sources, and the Developer audit trail.
+Polling is bounded to 601 reads; failure or exhaustion offers manual retry and
+never claims the task completed. An ambiguous start error asks the user to check
+History before retrying, rather than automatically creating another run.
+
+`/history` distinguishes browser-local conversations from database run history.
+The browser retains up to 30 conversations of 60 requests each in localStorage
+(product questions, mode, and run IDs; no copied evidence or API credentials).
+Do not type secrets. These conversations are not account-synced. Refresh/back/
+forward restore the selected conversation; saved run IDs are read, never POSTed
+again. Read-only queries are refreshed from current records, so this is not an
+immutable transcript. Clearing browser storage removes local conversation
+history but not database runs. If storage is unavailable, the UI warns and
+database run history remains accessible.
+
+The user may submit multiple independent requests in one conversation. Contextual
+pronouns, open-ended multi-turn reasoning, cross-competitor natural-language
+comparison, and real LLM providers are **not implemented**. Developer's existing
+audit tools remain available; its deep visual redesign and other page migrations
+are intentionally deferred until the homepage is accepted.
+
+Regression command (offline fixtures plus disposable local MySQL integration):
+
+```powershell
+& "D:\anaconda\envs\competitive-intel-py312\python.exe" -m pytest -p no:cacheprovider --basetemp=.pytest_tmp_stage87
+```
+
+Browser acceptance: send a supported request; explicitly choose Fixture only on
+a disposable test database; check real stage/tool records, report/source links,
+refresh and back/forward without new runs; test an unknown product, unsupported
+comparison, failed run, and the six sidebar destinations. Keep the production
+database free of new acceptance-test fixture facts.
+
 ## Not implemented yet
 
 - real natural-language AgentProvider and real fact-extraction model adapters
