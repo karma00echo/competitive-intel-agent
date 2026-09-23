@@ -25,6 +25,14 @@
   const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.file}"/></svg>`;
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const $ = id => document.getElementById(id);
+  function fillQuery(value) {
+    $('query').value = value;
+    $('query').setCustomValidity('');
+    $('query').focus();
+  }
+  function sampleBrief() {
+    return '# Competitive intelligence · Sample brief\n\nDESIGN PREVIEW — MOCK CONTENT, NOT VERIFIED INTELLIGENCE\n\n## Companies\n' + data.competitors.map(c => `- ${c.name}: ${c.category}`).join('\n') + '\n\n## Research checklist\n- Verify official sources\n- Capture evidence, collection time, and confidence\n- Mark missing information as unknown\n';
+  }
   document.querySelectorAll('[data-icon]').forEach(el => { el.outerHTML = icon(el.dataset.icon); });
   for (const [group, entries] of Object.entries(data.navigation)) {
     $(`${group}-nav`).innerHTML = entries.map(([target,label,symbol]) => `<a class="nav-item" href="#${target}">${icon(symbol)}<span>${escape(label)}</span></a>`).join('');
@@ -37,7 +45,7 @@
   }
   renderSuggestions();
   $('more').onclick = () => { expanded = !expanded; renderSuggestions(); };
-  $('suggestion-list').onclick = event => { const button = event.target.closest('[data-query]'); if(button) { $('query').value = button.dataset.query; $('query').focus(); } };
+  $('suggestion-list').onclick = event => { const button = event.target.closest('[data-query]'); if(button) fillQuery(button.dataset.query); };
   let toastTimer;
   function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; },4500); }
   function show(title,html) { $('detail-title').textContent = title; $('detail-content').innerHTML = html; $('detail').hidden = false; $('detail').focus({preventScroll:true}); $('detail').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',block:'nearest'}); }
@@ -56,9 +64,9 @@
       developer: () => show('Developer workspace','<p>This standalone preview has no live runs or tool traces. The production AgentRunner, persistence layer, and APIs are unchanged.</p>'),
       'fact-check': () => show('Check a finding', '<p>Select a source-backed finding to review its evidence, collection time, and confidence. No confirmed findings are available in this demo.</p>'),
       analyst: () => { $('detail').hidden = true; $('query').focus(); },
-      summarize: () => { $('query').value = 'Summarize the Notion competitor report'; $('query').focus(); },
-      compare: () => { $('query').value = 'Compare Notion and Asana pricing'; $('query').focus(); },
-      export: () => show('Export a sample brief','<p>Download a Markdown outline with clearly labeled sample content. No live competitive claims are included.</p><button class="detail-action" id="download">Download sample .md</button>'),
+      summarize: () => { $('detail').hidden = true; fillQuery('Summarize the Notion competitor report'); },
+      compare: () => { $('detail').hidden = true; fillQuery('Compare Notion and Asana pricing'); },
+      export: () => show('Export a sample brief', '<p>Download a Markdown outline with clearly labeled sample content, or select and copy the text below.</p><label for="export-preview">Sample Markdown</label><textarea id="export-preview" class="export-preview" readonly spellcheck="false">' + escape(sampleBrief()) + '</textarea><button class="detail-action" id="download">Download sample .md</button>'),
       home: () => { $('detail').hidden = true; }
     };
     (views[target] || views.home)();
@@ -67,7 +75,7 @@
   // Repeated clicks on the current destination still reopen its panel.
   document.addEventListener('click',event => { const a = event.target.closest('a[href^="#"]'); if(a && a.hash === location.hash) { event.preventDefault(); route(); } });
   $('close-detail').onclick = () => { $('detail').hidden = true; location.hash = 'home'; document.querySelector('.feature-card').focus(); };
-  $('new').onclick = () => { location.hash = 'home'; $('detail').hidden = true; $('query').value = ''; $('query').focus(); };
+  $('new').onclick = () => { location.hash = 'home'; route(); fillQuery(''); };
   $('menu').onclick = () => { const open = document.querySelector('.workspace').classList.toggle('menu-open'); $('menu').setAttribute('aria-expanded',String(open)); };
   ['web-toggle','evidence-toggle'].forEach(id => { $(id).onclick = () => $(id).setAttribute('aria-pressed',String($(id).getAttribute('aria-pressed') !== 'true')); });
   $('notifications').onclick = () => toast('You are viewing sample content. No live monitoring notifications.');
@@ -96,8 +104,11 @@
   document.addEventListener('click',event => { if(!event.target.closest('.search-wrap')) $('search-results').hidden = true; });
   $('detail-content').onclick = event => {
     if(event.target.id !== 'download') return;
-    const text = '# Competitive intelligence · Sample brief\n\nDESIGN PREVIEW — MOCK CONTENT, NOT VERIFIED INTELLIGENCE\n\n## Companies\n' + data.competitors.map(c => `- ${c.name}: ${c.category}`).join('\n') + '\n\n## Research checklist\n- Verify official sources\n- Capture evidence, collection time, and confidence\n- Mark missing information as unknown\n';
-    const url = URL.createObjectURL(new Blob([text],{type:'text/markdown;charset=utf-8'})); const a = document.createElement('a'); a.href = url; a.download = 'sample-competitive-brief.md'; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000); toast('Sample brief downloaded.');
+    const url = URL.createObjectURL(new Blob([sampleBrief()],{type:'text/markdown;charset=utf-8'}));
+    const a = document.createElement('a'); a.href = url; a.download = 'sample-competitive-brief.md';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url),30000);
+    toast('Download requested. If no file appears, copy the Markdown preview.');
   };
   route();
 })();

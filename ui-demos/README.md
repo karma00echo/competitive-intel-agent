@@ -13,7 +13,9 @@ no external fonts, image services, or network requests.
 Navigation opens local preview panels; search finds demo sections and companies;
 suggestions fill the analyst input; submission shows a research outline only.
 Web search and Evidence are preview preferences, not live integrations. Export
-downloads a clearly labeled sample Markdown brief. Ctrl/Cmd+K focuses search,
+offers a selectable Markdown preview and requests a sample file download. The
+preview remains usable in embedded browsers that do not support downloads;
+the UI does not claim that a file was saved. Ctrl/Cmd+K focuses search,
 Ctrl/Cmd+Enter submits the preview, Alt+N starts a new input, and Escape closes
 search results and the mobile navigation. No database or API is accessed.
 
