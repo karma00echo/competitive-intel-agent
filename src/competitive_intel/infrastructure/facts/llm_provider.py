@@ -20,7 +20,12 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-json-mode-v2"
+POLICY_VERSION = "quoted-facts-json-mode-v3-category-aliases"
+# Classification-only aliases. Never apply to descriptions, prices or evidence.
+FEATURE_CATEGORY_ALIASES = {
+    "DOCUMENTS": ("docs", "doc", "document", "documents"),
+    "MEETINGS": ("meeting", "meetings", "meeting notes", "ai meeting notes"),
+}
 LIST_FIELDS = {"target_users", "primary_use_cases", "included_features", "affected_features"}
 OPTIONAL_FIELDS = {"deployment_type", "availability", "related_plan", "target_user",
                    "amount", "currency", "region", "published_date"}
@@ -146,6 +151,12 @@ def _ground(candidate: CandidateFact, content: str, url: str, *,
                 or (candidate.fact_category.value, key) in ENUM_FIELDS)):
             continue
         if (candidate.fact_category.value, key) in ENUM_FIELDS:
+            if key == "feature_category" and value in FEATURE_CATEGORY_ALIASES:
+                if not any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", evidence)
+                           for term in FEATURE_CATEGORY_ALIASES[value]):
+                    reject("UNGROUNDED_FIELD", key, value,
+                           "ENUM_NOT_EXPLICITLY_SUPPORTED", "explicit_category_alias_word_boundary")
+                continue
             # Conservative enum grounding; existing evidence checker also checks prices.
             if value in {"OTHER", "PUBLIC"}:
                 # OTHER is a non-semantic category; PUBLIC means this public page states it.

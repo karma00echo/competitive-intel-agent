@@ -52,6 +52,13 @@ failure type and matching strategy. At most 50 field diagnostics are retained;
 credential-shaped text is redacted. These are untrusted excerpts, not confirmed
 facts. Rejection of any field still rejects the entire page; diagnostics do not
 relax matching, change the prompt, or authorize saving unsupported facts.
+Feature classification alone recognizes explicit case-insensitive whole-word
+aliases: Docs/Doc/Document/Documents → DOCUMENTS and
+Meeting/Meetings/Meeting Notes/AI Meeting Notes → MEETINGS. Matching uses the
+existing whitespace/case-normalized evidence; no stemming, semantic inference or
+LLM judgment is used. Descriptions, prices, numbers, source/snapshot bindings and
+verbatim evidence checks are unchanged. The versioned extraction policy prevents
+reuse of results validated under a different policy.
 
 For a bounded single-page smoke test, call `FactExtractionService.extract` with
 `source_id` set to an existing verified source of the named competitor. It reads

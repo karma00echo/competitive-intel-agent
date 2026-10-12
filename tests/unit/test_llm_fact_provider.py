@@ -266,3 +266,54 @@ def test_diagnostics_bound_and_redact_untrusted_text():
     assert len(diagnostic["field_value"]) <= 161
     assert len(diagnostic["evidence_snippet"]) <= 241
     assert not result.candidate_facts
+
+
+@pytest.mark.parametrize("quote,category", [
+    ("Docs", "DOCUMENTS"), ("Doc", "DOCUMENTS"),
+    ("Document", "DOCUMENTS"), ("Documents", "DOCUMENTS"),
+    ("meeting", "MEETINGS"), ("Meetings", "MEETINGS"),
+    ("Meeting Notes", "MEETINGS"), ("AI Meeting Notes", "MEETINGS"),
+    ("Docs → Create block-based docs that flex from a note to a full spec.", "DOCUMENTS"),
+    ("AI Meeting Notes → Capture every meeting, in one shared workspace.", "MEETINGS"),
+])
+def test_explicit_feature_category_aliases(quote, category):
+    item = fact()
+    item["fact_value"].update(feature_name=quote, normalized_feature_name=quote,
+                             feature_description=quote, feature_category=category)
+    item["evidence_text"] = quote
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[item]})])).extract(replace(request(), clean_content=quote))
+    assert not result.error
+    assert len(result.candidate_facts) == 1
+    assert not result.evidence_diagnostics
+
+
+@pytest.mark.parametrize("quote,category", [
+    ("Team chat", "DOCUMENTS"), ("Meetings", "DOCUMENTS"),
+    ("documentary", "DOCUMENTS"), ("Docsify", "DOCUMENTS"),
+    ("documents_archive", "DOCUMENTS"), ("Docs", "MEETINGS"),
+    ("Team chat", "MEETINGS"), ("premeeting", "MEETINGS"),
+    ("meetings_archive", "MEETINGS"),
+])
+def test_category_aliases_do_not_match_unrelated_words(quote, category):
+    item = fact()
+    item["fact_value"].update(feature_name=quote, normalized_feature_name=quote,
+                             feature_description=quote, feature_category=category)
+    item["evidence_text"] = quote
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[item]})])).extract(replace(request(), clean_content=quote))
+    assert result.error == "UNGROUNDED_FIELD"
+    assert not result.candidate_facts
+    assert result.evidence_diagnostics[0]["match_strategy"] == "explicit_category_alias_word_boundary"
+
+
+def test_aliases_never_normalize_descriptive_fields():
+    item = fact()
+    item["fact_value"].update(feature_category="DOCUMENTS", feature_description="Documents")
+    item["evidence_text"] = "Docs"
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[item]})])).extract(replace(request(), clean_content="Docs"))
+    # "Docs" supports the category, but cannot substitute for a quoted description.
+    assert result.error == "UNGROUNDED_FIELD"
+    assert not result.candidate_facts
+    assert result.evidence_diagnostics[0]["field_name"] == "feature_description"
