@@ -59,6 +59,13 @@ existing whitespace/case-normalized evidence; no stemming, semantic inference or
 LLM judgment is used. Descriptions, prices, numbers, source/snapshot bindings and
 verbatim evidence checks are unchanged. The versioned extraction policy prevents
 reuse of results validated under a different policy.
+The conservative LLM contract permits null FEATURE status/category when evidence
+does not explicitly support them. The unchanged legacy domain schema requires
+enums, so the adapter maps only null to UNKNOWN (status) / OTHER (unclassified).
+Each such mapping is audited with the original null. Non-null unsupported claims
+still reject the page; they are never silently converted to unknown. Required
+descriptions and all other grounding checks are unchanged. Website presence does
+not establish AVAILABLE, and Databases does not establish PROJECT_MANAGEMENT.
 
 For a bounded single-page smoke test, call `FactExtractionService.extract` with
 `source_id` set to an existing verified source of the named competitor. It reads

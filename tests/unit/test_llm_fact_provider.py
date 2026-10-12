@@ -317,3 +317,44 @@ def test_aliases_never_normalize_descriptive_fields():
     assert result.error == "UNGROUNDED_FIELD"
     assert not result.candidate_facts
     assert result.evidence_diagnostics[0]["field_name"] == "feature_description"
+
+
+@pytest.mark.parametrize("quote,category,status,expected_error", [
+    ("Docs", "DOCUMENTS", None, None),
+    ("Docs", "DOCUMENTS", "AVAILABLE", "UNGROUNDED_FIELD"),
+    ("Databases", None, None, None),
+    ("Databases", "PROJECT_MANAGEMENT", None, "UNGROUNDED_FIELD"),
+    ("Docs available now", "DOCUMENTS", "AVAILABLE", None),
+    ("Docs coming soon", "DOCUMENTS", "COMING_SOON", None),
+    ("Meeting Notes", "MEETINGS", None, None),
+])
+def test_conservative_null_contract_preserves_explicit_grounding(quote, category, status, expected_error):
+    item = fact()
+    item["fact_value"].update(feature_name=quote, normalized_feature_name=quote,
+        feature_description=quote, feature_category=category, status=status)
+    item["evidence_text"] = quote
+    session = Session([Response({"snapshot_id":12,"facts":[item]})])
+    result = LLMFactExtractionProvider(config(), session=session).extract(replace(request(), clean_content=quote))
+    assert result.error == expected_error
+    prompt = session.calls[0][1]["json"]["messages"][0]["content"]
+    assert "listing a feature on an official website NEVER proves AVAILABLE" in prompt
+    assert "Databases does NOT imply PROJECT_MANAGEMENT" in prompt
+    assert "Do not infer, classify, normalize, or assume" in prompt
+    if expected_error:
+        assert not result.candidate_facts
+    else:
+        value = result.candidate_facts[0].fact_value
+        assert value["status"] == (status or "UNKNOWN")
+        assert value["feature_category"] == (category or "OTHER")
+        assert not result.evidence_diagnostics
+        assert len(result.contract_adaptations) == int(status is None) + int(category is None)
+        assert all(a["model_value"] is None for a in result.contract_adaptations)
+
+
+def test_null_contract_does_not_make_required_description_optional():
+    item = fact()
+    item["fact_value"].update(status=None, feature_category=None, feature_description=None)
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[item]})])).extract(request())
+    assert result.error == "INVALID_SCHEMA"
+    assert not result.candidate_facts

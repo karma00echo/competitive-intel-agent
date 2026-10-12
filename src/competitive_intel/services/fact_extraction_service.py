@@ -229,6 +229,9 @@ class FactExtractionService:
                      "reused": reused, "candidate_count": len(candidates),
                      "status": "FAILED" if response.error else "SUCCEEDED", "error_code": response.error}
             audit["http_audit"] = list(response.http_audit)
+            audit["contract_adaptations"] = [
+                {**item, "source_id": source["id"]} for item in response.contract_adaptations
+            ]
             audit["evidence_diagnostics"] = [
                 {**item, "source_id": source["id"], "snapshot_id": snapshot["id"]}
                 for item in response.evidence_diagnostics

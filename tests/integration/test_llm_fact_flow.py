@@ -38,9 +38,10 @@ class Discovery:
 
 
 class Transport:
-    def __init__(self, bad=False):
+    def __init__(self, bad=False, null_fields=False):
         self.count = 0
         self.bad = bad
+        self.null_fields = null_fields
 
     def post(self, url, **kwargs):
         self.count += 1
@@ -51,6 +52,8 @@ class Transport:
                 "feature_description":TEXT,"feature_category":"OTHER",
                 "availability":None,"related_plan":None,"status":"UNKNOWN"},
             "evidence_text":"invented" if self.bad else TEXT,"confidence":0.9}]}
+        if self.null_fields:
+            payload["facts"][0]["fact_value"].update(status=None, feature_category=None)
         data = {"choices":[{"finish_reason":"stop","message":{"content":json.dumps(payload)}}],
                 "usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}
         response = Mock(status_code=200)
@@ -193,3 +196,19 @@ def test_single_source_extraction_persists_audit_without_changes(persistence):
     assert audit["endpoint_path"] == "/chat/completions"
     with pytest.raises(ValueError, match="verified"):
         service.extract("Acme", source_id=-1)
+
+
+def test_null_feature_fields_persist_as_audited_legacy_sentinels(persistence):
+    seed(persistence)
+    result = runner(persistence, Transport(null_fields=True)).run("Acme")
+    assert result.summary.confirmed_fact_count == 1
+    with persistence.transaction() as session:
+        facts = persistence.product_facts.list_for_run(session, result.run_id)
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+    value = json.loads(facts[0]["fact_value"])
+    assert value["status"] == "UNKNOWN" and value["feature_category"] == "OTHER"
+    assert facts[0]["evidence_status"] == "CONFIRMED"
+    output = next(json.loads(c["output_summary"]) for c in calls if c["tool_name"] == "extract_competitor_facts")
+    adaptations = output["provider_calls"][0]["contract_adaptations"]
+    assert len(adaptations) == 2
+    assert all(a["model_value"] is None and a["source_id"] > 0 for a in adaptations)
