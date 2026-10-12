@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from hashlib import sha256
-from time import sleep
+from time import perf_counter, sleep
 from urllib.parse import urlsplit
 
 import requests
@@ -19,7 +20,7 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-v1"
+POLICY_VERSION = "quoted-facts-json-mode-v2"
 LIST_FIELDS = {"target_users", "primary_use_cases", "included_features", "affected_features"}
 OPTIONAL_FIELDS = {"deployment_type", "availability", "related_plan", "target_user",
                    "amount", "currency", "region", "published_date"}
@@ -104,15 +105,42 @@ def _validate(value, schema: dict) -> None:
         raise ValueError("INVALID_SCHEMA")
 
 
-def _ground(candidate: CandidateFact, content: str, url: str) -> None:
+def _diagnostic_text(value, limit: int) -> str:
+    """Bounded untrusted excerpts; never log credential-shaped strings."""
+    text = str(value)
+    text = re.sub(r"(?i)(authorization|api[_ -]?key|bearer|password|secret)\s*[:= ]\s*\S+",
+                  "[REDACTED]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", text)
+    text = " ".join(text.split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _ground(candidate: CandidateFact, content: str, url: str, *,
+            diagnostics: list | None = None, fact_index: int = 0,
+            snapshot_id: int | None = None) -> None:
+    failures = []
+
+    def reject(error, field, value, reason, strategy):
+        failures.append(error)
+        if diagnostics is not None and len(diagnostics) < 50:
+            diagnostics.append({"fact_index": fact_index, "field_name": field,
+                "field_value": _diagnostic_text(value, 160),
+                "evidence_snippet": _diagnostic_text(candidate.evidence_text, 240),
+                "snapshot_id": snapshot_id, "reject_reason": error,
+                "failure_type": reason, "match_strategy": strategy})
+
     evidence = normalized_evidence(candidate.evidence_text)
     if not evidence or evidence not in normalized_evidence(content):
+        reject("EVIDENCE_NOT_FOUND", "evidence_text", candidate.evidence_text,
+               "MISSING_EVIDENCE" if not evidence else "EVIDENCE_NOT_IN_SNAPSHOT",
+               "normalized_contiguous_substring")
         raise ValueError("EVIDENCE_NOT_FOUND")
     for key, value in candidate.fact_value.items():
         if key.startswith("normalized_"):
             original = key.removeprefix("normalized_")
             if value != candidate.fact_value[original]:
-                raise ValueError("UNSUPPORTED_NORMALIZED_NAME")
+                reject("UNSUPPORTED_NORMALIZED_NAME", key, value,
+                       "UNSUPPORTED_NORMALIZATION", "exact_original_name")
             continue
         if value is None or (value == "UNKNOWN" and (key in {"tax_status", "update_type", "status"}
                 or (candidate.fact_category.value, key) in ENUM_FIELDS)):
@@ -128,14 +156,21 @@ def _ground(candidate: CandidateFact, content: str, url: str) -> None:
                        "CONTACT_SALES": ("contact sales", "联系销售"), "FREE": ("free", "免费"),
                        "AVAILABLE": ("available", "可用"), "NOT_DISCLOSED": ("not disclosed",)}
             if not any(term in evidence for term in aliases.get(value, (value.lower().replace("_", " "),))):
-                raise ValueError("UNGROUNDED_FIELD")
+                reject("UNGROUNDED_FIELD", key, value,
+                       "ENUM_NOT_EXPLICITLY_SUPPORTED", "enum_alias_substring")
             continue
         values = value if isinstance(value, list) else [value]
-        for item in values:
+        for item_index, item in enumerate(values):
             if not item or normalized_evidence(str(item)) not in evidence:
-                raise ValueError("UNGROUNDED_FIELD")
+                field = f"{key}[{item_index}]" if isinstance(value, list) else key
+                reject("UNGROUNDED_FIELD", field, item,
+                       "VALUE_NOT_FOUND", "normalized_substring_in_quote")
+    if failures:
+        raise ValueError(failures[0])
     check = EvidenceChecker().check(candidate, content, url)
     if check.status != EvidenceCheckStatus.CONFIRMED:
+        reject("EVIDENCE_VALIDATION_FAILED", "__fact__", "[see bounded evidence]",
+               check.status.value, "existing_evidence_checker")
         raise ValueError("EVIDENCE_VALIDATION_FAILED")
 
 
@@ -158,10 +193,13 @@ class LLMFactExtractionProvider:
         cfg = self.settings
         attempts = 0
         usage: dict[str, int] = {}
+        http_audit: list[dict] = []
+        evidence_diagnostics: list[dict] = []
 
         def result(facts=(), error=None, warnings=()):
             return FactExtractionResponse(tuple(facts), self.name, cfg.model or "unconfigured",
-                                          "", usage, tuple(warnings), error, attempts)
+                                          "", usage, tuple(warnings), error, attempts, tuple(http_audit),
+                                          tuple(evidence_diagnostics))
 
         endpoint = urlsplit(cfg.endpoint or "")
         if (not cfg.api_key or not cfg.model or endpoint.scheme != "https"
@@ -180,26 +218,41 @@ class LLMFactExtractionProvider:
         if not request.allowed_fact_categories:
             return result(error="NO_ALLOWED_CATEGORIES")
         schema = output_schema(request)
+        request_url = cfg.endpoint.rstrip("/")
+        if not request_url.endswith("/chat/completions"):
+            request_url += "/chat/completions"
+        target = urlsplit(request_url)
         payload = {"model": cfg.model, "messages": [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": SYSTEM + "\nReturn JSON conforming exactly to this JSON Schema:\n" + json.dumps(schema)},
             {"role": "user", "content": json.dumps({"competitor_name": request.competitor_name,
              "source_type": request.source_type, "snapshot_id": request.snapshot_id,
              "max_facts": request.max_facts, "clean_content": content}, ensure_ascii=False)}],
-            "response_format": {"type": "json_schema", "json_schema": {
-                "name": "competitor_facts", "strict": True, "schema": schema}},
-            "max_completion_tokens": cfg.max_output_tokens}
+            "response_format": {"type": "json_object"},
+            "max_tokens": cfg.max_output_tokens}
+        # Vendor-specific transport options stay inside this adapter.
+        if target.hostname == "api.deepseek.com":
+            payload["thinking"] = {"type": "disabled"}
         for attempt in range(cfg.max_retries + 1):
             if self._calls >= cfg.max_calls:
                 return result(error="MODEL_CALL_LIMIT")
             self._calls += 1
             attempts += 1
+            started = perf_counter()
+            audit = {"http_status": None, "endpoint_host": target.hostname,
+                     "endpoint_path": target.path, "model": cfg.model,
+                     "provider_error_type": None, "provider_error_code": None,
+                     "safe_message": None, "duration_ms": 0}
+            http_audit.append(audit)
             try:
-                with self._session.post(cfg.endpoint, json=payload,
+                with self._session.post(request_url, json=payload,
                         headers={"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"},
                         timeout=(min(10, cfg.timeout_seconds), cfg.timeout_seconds),
                         allow_redirects=False, stream=True) as response:
                     status = response.status_code
+                    audit["http_status"] = status
                     if status != 200:
+                        audit.update(_safe_http_error(response, cfg.api_key))
+                        audit["duration_ms"] = max(0, int((perf_counter() - started) * 1000))
                         error = {401: "LLM_AUTHENTICATION_FAILED", 403: "LLM_FORBIDDEN",
                                  429: "LLM_RATE_LIMITED"}.get(status, "LLM_HTTP_ERROR")
                         retryable = status == 429 or status >= 500
@@ -230,20 +283,33 @@ class LLMFactExtractionProvider:
                 parsed = json.loads(choice["message"]["content"])
                 _validate(parsed, schema)
                 if parsed["snapshot_id"] != request.snapshot_id:
+                    evidence_diagnostics.append({"fact_index": None, "field_name": "snapshot_id",
+                        "field_value": str(parsed["snapshot_id"])[:160], "evidence_snippet": "",
+                        "snapshot_id": request.snapshot_id, "reject_reason": "WRONG_SNAPSHOT_REFERENCE",
+                        "failure_type": "SNAPSHOT_MISMATCH", "match_strategy": "exact_snapshot_id"})
                     return result(error="WRONG_SNAPSHOT_REFERENCE")
                 if len(parsed["facts"]) > request.max_facts:
                     return result(error="TOO_MANY_FACTS")
                 candidates = []
                 identities = set()
-                for item in parsed["facts"]:
+                grounding_errors = []
+                for fact_index, item in enumerate(parsed["facts"]):
                     candidate = CandidateFact(FactCategory(item["fact_category"]), item["fact_value"],
                                               item["evidence_text"], item["evidence_text"], item["confidence"])
-                    _ground(candidate, content, request.source_url)
+                    try:
+                        _ground(candidate, content, request.source_url,
+                                diagnostics=evidence_diagnostics, fact_index=fact_index,
+                                snapshot_id=request.snapshot_id)
+                    except ValueError as exc:
+                        grounding_errors.append(str(exc))
+                        continue
                     identity = EvidenceChecker().check(candidate, content, request.source_url).fact_key
                     if identity in identities:
                         raise ValueError("DUPLICATE_FACT_IDENTITY")
                     identities.add(identity)
                     candidates.append(candidate)
+                if grounding_errors:
+                    return result(error=grounding_errors[0])
                 return result(candidates, error=None if candidates else "NO_VERIFIABLE_FACTS",
                               warnings=() if candidates else ("NO_VERIFIABLE_FACTS",))
             except requests.Timeout:
@@ -255,4 +321,43 @@ class LLMFactExtractionProvider:
                 known = {"INVALID_SCHEMA", "EVIDENCE_NOT_FOUND", "UNGROUNDED_FIELD",
                          "UNSUPPORTED_NORMALIZED_NAME", "EVIDENCE_VALIDATION_FAILED", "DUPLICATE_FACT_IDENTITY"}
                 return result(error=str(exc) if str(exc) in known else "LLM_INVALID_RESPONSE")
+            finally:
+                audit["duration_ms"] = max(0, int((perf_counter() - started) * 1000))
         return result(error="LLM_REQUEST_FAILED")
+
+
+def _safe_http_error(response, api_key: str) -> dict:
+    """Never persist arbitrary provider prose: it can echo headers or page input."""
+    safe = {"provider_error_type": None, "provider_error_code": None,
+            "safe_message": "Provider error message withheld (not on safe allowlist)."}
+    body = bytearray()
+    for chunk in response.iter_content(4096):
+        body.extend(chunk)
+        if len(body) > 16_384:
+            return safe
+    try:
+        error = json.loads(body).get("error", {})
+        if not isinstance(error, dict):
+            return safe
+        # Exact known protocol identifiers only; arbitrary strings may be secrets.
+        identifiers = {"invalid_request_error", "authentication_error", "rate_limit_error",
+                       "server_error", "insufficient_quota", "invalid_api_key",
+                       "model_not_found", "invalid_parameter", "invalid_request",
+                       "insufficient_balance", "rate_limit_exceeded"}
+        for key in ("type", "code"):
+            value = error.get(key)
+            if isinstance(value, str) and value in identifiers and api_key not in value:
+                safe[f"provider_error_{key}"] = value
+        message = error.get("message")
+        if isinstance(message, str) and api_key not in message:
+            normalized = re.sub(r"[.!\s]+$", "", message.strip()).casefold()
+            messages = {"insufficient balance": "Insufficient balance",
+                        "invalid api key": "Invalid API key", "model not found": "Model not found",
+                        "rate limit exceeded": "Rate limit exceeded",
+                        "invalid response_format": "Invalid response_format",
+                        "invalid request": "Invalid request", "internal server error": "Internal server error"}
+            if normalized in messages:
+                safe["safe_message"] = messages[normalized]
+    except (ValueError, AttributeError):
+        pass
+    return safe

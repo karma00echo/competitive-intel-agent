@@ -52,6 +52,7 @@ class FactExtractionService:
         *,
         run_id: int | None = None,
         current_run_only: bool = False,
+        source_id: int | None = None,
     ) -> FactExtractionResult:
         warnings: list[str] = []
         errors: list[str] = []
@@ -80,6 +81,10 @@ class FactExtractionService:
             all_sources = self._persistence.sources.list_verified(
                 session, competitor["id"]
             )
+            if source_id is not None:
+                all_sources = [source for source in all_sources if source["id"] == source_id]
+                if not all_sources:
+                    raise ValueError("Source must be verified, enabled, and belong to this competitor.")
             sources = all_sources[: self._limits.max_pages]
             if owns_run:
                 run_id = self._persistence.agent_runs.create(
@@ -223,6 +228,11 @@ class FactExtractionService:
                      "usage": response.usage, "attempts": response.attempts,
                      "reused": reused, "candidate_count": len(candidates),
                      "status": "FAILED" if response.error else "SUCCEEDED", "error_code": response.error}
+            audit["http_audit"] = list(response.http_audit)
+            audit["evidence_diagnostics"] = [
+                {**item, "source_id": source["id"], "snapshot_id": snapshot["id"]}
+                for item in response.evidence_diagnostics
+            ]
             provider_calls.append(audit)
             if response.error:
                 errors.append(f"Source {source['id']}: {response.error}")

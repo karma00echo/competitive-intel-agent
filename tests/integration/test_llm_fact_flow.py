@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 from unittest.mock import Mock
 from types import SimpleNamespace
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -117,6 +118,11 @@ def test_invalid_real_response_fails_run_without_facts_changes_report(persistenc
         assert data["provider_summary"]["fact_provider"] == "openai_compatible"
         assert data["fact_extraction_status"] == "FAILED"
         assert data["run"]["fact_provider_calls"][0]["error_code"] == "EVIDENCE_NOT_FOUND"
+        diagnostic = data["run"]["fact_provider_calls"][0]["evidence_diagnostics"][0]
+        assert diagnostic["fact_index"] == 0
+        assert diagnostic["field_name"] == "evidence_text"
+        assert diagnostic["failure_type"] == "EVIDENCE_NOT_IN_SNAPSHOT"
+        assert diagnostic["source_id"] > 0 and diagnostic["snapshot_id"] > 0
         assert "test-only" not in json.dumps(data)
 
 
@@ -154,3 +160,36 @@ def test_provider_switch_rebaselines_without_fake_changes(persistence):
         a = persistence.fact_observations.list_for_run(session,first.run_id)
         b = persistence.fact_observations.list_for_run(session,second.run_id)
     assert a[0]["id"] != b[0]["id"]
+
+
+def test_single_source_extraction_persists_audit_without_changes(persistence):
+    seed(persistence)
+    with persistence.transaction() as session:
+        competitor = persistence.competitors.get_by_normalized_name(session, "acme")
+        source = persistence.sources.list_verified(session, competitor["id"])[0]
+        other_id = persistence.sources.create(session, competitor_id=competitor["id"],
+            source_type="FEATURES", url="https://acme.example/other",
+            normalized_url="https://acme.example/other", domain="acme.example",
+            verification_status="VERIFIED", confidence=0.99,
+            verified_at=datetime.now(UTC).replace(tzinfo=None))
+        run_id = persistence.agent_runs.create(session, competitor_id=competitor["id"],
+            input_name="Acme", normalized_input="acme", run_mode="BASELINE", current_state="PAGE_FETCHING")
+    for source_id in (source["id"], other_id):
+        SnapshotService(persistence, Page()).process(source_id=source_id, run_id=run_id)
+    transport = Transport()
+    provider = LLMFactExtractionProvider(LLMSettings(api_key="test-only", model="test-model",
+        endpoint="https://model.example", max_calls=1, max_retries=0), session=transport)
+    service = FactExtractionService(persistence, provider)
+    result = service.extract("Acme", source_id=source["id"])
+    assert transport.count == 1
+    assert len(result.saved) == 1
+    assert not result.errors
+    assert result.source_ids == (source["id"],)
+    with persistence.transaction() as session:
+        assert not persistence.changes.list_for_run(session, result.run_id)
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+    audit = json.loads(calls[0]["output_summary"])["provider_calls"][0]["http_audit"][0]
+    assert audit["http_status"] == 200
+    assert audit["endpoint_path"] == "/chat/completions"
+    with pytest.raises(ValueError, match="verified"):
+        service.extract("Acme", source_id=-1)

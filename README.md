@@ -21,14 +21,17 @@ LLM_MAX_RETRIES=1
 LLM_MAX_CALLS=8
 ```
 
-`LLM_ENDPOINT` is the full HTTPS Chat Completions endpoint, not a base URL.
-The configured service/model must support strict `response_format.json_schema`
-and `max_completion_tokens`; unsupported services fail explicitly, without a
-JSON-mode or Fixture fallback. No additional SDK dependency was added. The web
+`LLM_ENDPOINT` accepts an HTTPS base URL (for example `https://api.deepseek.com`)
+or a full Chat Completions URL. The adapter appends `/chat/completions` only when
+it is missing, preserving an optional `/v1` prefix. It sends `json_object` and
+`max_tokens`, with the exact JSON Schema in the system prompt. DeepSeek requests
+disable thinking to bound extraction cost. Strict server-side schema, field,
+snapshot and evidence validation remain mandatory; there is no Fixture fallback.
+No additional SDK dependency was added. The web
 request's `fact_provider` explicitly selects the mode; setting `LLM_PROVIDER`
 alone never changes an existing Fixture request into a paid request. Configuration
 is loaded on server startup, so restart the server after editing `.env`.
-Schema format follows the [official Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+JSON mode follows the [DeepSeek Chat Completions interface](https://api-docs.deepseek.com/api/create-chat-completion/).
 
 Only successful, cleaned snapshots are submitted. The adapter has no tools,
 filesystem access, or database access. It sends webpage text as untrusted data,
@@ -40,6 +43,22 @@ Actual returned token counts, elapsed milliseconds, model, attempt count and saf
 error codes appear in Developer audit. Missing usage is unknown, not zero or an
 estimated monetary cost. Provider bodies, request headers and credentials are not
 logged. No raw provider response is persisted.
+HTTP audit includes status, host/path, model, elapsed time and allowlisted provider
+error type/code/message. Unrecognized error prose is withheld because a provider
+could echo credentials or page content. No headers or error bodies are persisted.
+Evidence rejection audits include zero-based fact index, field name, bounded
+value (160 characters), bounded quote (240 characters), source/snapshot IDs,
+failure type and matching strategy. At most 50 field diagnostics are retained;
+credential-shaped text is redacted. These are untrusted excerpts, not confirmed
+facts. Rejection of any field still rejects the entire page; diagnostics do not
+relax matching, change the prompt, or authorize saving unsupported facts.
+
+For a bounded single-page smoke test, call `FactExtractionService.extract` with
+`source_id` set to an existing verified source of the named competitor. It reads
+only that source's latest successful cleaned snapshot. Set provider `max_calls=1`,
+`max_retries=0`; do not launch `smoke_real_llm.py` (which runs the full Agent).
+This extraction-only path saves validated facts and an audit run, without calling
+change detection, signal generation, or report generation.
 
 All accepted descriptive fields must be verbatim substrings of a contiguous
 evidence excerpt in the supplied snapshot. Source URLs are bound by the server,

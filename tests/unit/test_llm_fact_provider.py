@@ -76,7 +76,10 @@ def test_strict_output_binding_usage_no_tools_or_secrets_in_prompt():
     assert result.attempts == 1
     _, call = session.calls[0]
     assert call["allow_redirects"] is False
-    assert call["json"]["response_format"]["json_schema"]["strict"] is True
+    assert call["json"]["response_format"] == {"type": "json_object"}
+    assert "JSON Schema" in call["json"]["messages"][0]["content"]
+    assert call["json"]["max_tokens"] == config().max_output_tokens
+    assert "max_completion_tokens" not in call["json"]
     assert "tools" not in call["json"]
     assert config().api_key not in json.dumps(call["json"])
     assert config().api_key not in repr(config())
@@ -167,3 +170,99 @@ def test_modes_and_usage_redaction():
         AnalysisRequest(competitor_name="Acme",fact_provider="openai_compatible")
     value = AgentRunner._safe_value({"total_tokens":168,"access_token":"secret","prompt_tokens":"secret"})
     assert value == {"total_tokens":168,"access_token":"[REDACTED]","prompt_tokens":"[REDACTED]"}
+
+
+@pytest.mark.parametrize("endpoint,expected", [
+    ("https://api.deepseek.com", "https://api.deepseek.com/chat/completions"),
+    ("https://api.deepseek.com/", "https://api.deepseek.com/chat/completions"),
+    ("https://api.deepseek.com/chat/completions", "https://api.deepseek.com/chat/completions"),
+    ("https://api.deepseek.com/chat/completions/", "https://api.deepseek.com/chat/completions"),
+    ("https://model.example/v1", "https://model.example/v1/chat/completions"),
+])
+def test_endpoint_and_json_mode(endpoint, expected):
+    session = Session()
+    result = LLMFactExtractionProvider(config(endpoint=endpoint), session=session).extract(request())
+    assert not result.error
+    url, call = session.calls[0]
+    assert url == expected
+    assert call["json"]["response_format"] == {"type": "json_object"}
+    assert "max_completion_tokens" not in call["json"]
+    assert "json_schema" not in call["json"]["response_format"]
+    assert ("thinking" in call["json"]) == ("api.deepseek.com" in endpoint)
+    assert result.http_audit[0]["http_status"] == 200
+    assert result.http_audit[0]["duration_ms"] >= 0
+
+
+def test_safe_http_audit_and_untrusted_error_message():
+    for message, expected in [("Invalid request.", "Invalid request"),
+                               ("Authorization: Bearer test-only-never-real " + TEXT,
+                                "Provider error message withheld (not on safe allowlist).")]:
+        session = Session([Response(status=400, error={"type":"invalid_request_error",
+            "code":"invalid_parameter", "message":message})])
+        result = LLMFactExtractionProvider(config(), session=session).extract(request())
+        audit = result.http_audit[0]
+        assert audit["http_status"] == 400
+        assert audit["provider_error_type"] == "invalid_request_error"
+        assert audit["provider_error_code"] == "invalid_parameter"
+        assert audit["safe_message"] == expected
+        assert audit["endpoint_path"] == "/v1/chat/completions"
+        assert config().api_key not in repr(result)
+        assert TEXT not in repr(result)
+
+
+def test_error_identifiers_and_oversized_error_body_are_not_logged():
+    for error in [{"type":TEXT,"code":config().api_key,"message":TEXT},
+                  {"message":"x" * 20_000}]:
+        result = LLMFactExtractionProvider(config(), session=Session([
+            Response(status=400, error=error)])).extract(request())
+        assert result.error == "LLM_HTTP_ERROR"
+        assert result.http_audit[0]["provider_error_type"] is None
+        assert result.http_audit[0]["provider_error_code"] is None
+        assert TEXT not in repr(result)
+        assert config().api_key not in repr(result)
+
+
+def test_field_diagnostics_collect_failures_without_accepting_any_facts():
+    first = fact()
+    first["fact_value"].update(feature_name="Imaginary", normalized_feature_name="Imaginary",
+                               status="AVAILABLE")
+    second = fact()
+    second["fact_value"]["feature_description"] = "Unsupported claim"
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[first,second]})])).extract(request())
+    assert result.error == "UNGROUNDED_FIELD"
+    assert not result.candidate_facts
+    diagnostics = result.evidence_diagnostics
+    assert [(d["fact_index"], d["field_name"]) for d in diagnostics] == [
+        (0,"feature_name"),(0,"status"),(1,"feature_description")]
+    assert diagnostics[0]["field_value"] == "Imaginary"
+    assert diagnostics[0]["evidence_snippet"] == TEXT
+    assert diagnostics[0]["snapshot_id"] == 12
+    assert diagnostics[1]["failure_type"] == "ENUM_NOT_EXPLICITLY_SUPPORTED"
+    assert diagnostics[2]["failure_type"] == "VALUE_NOT_FOUND"
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    (lambda p:p["facts"][0].update(evidence_text=""), "MISSING_EVIDENCE"),
+    (lambda p:p["facts"][0].update(evidence_text="Not in snapshot"), "EVIDENCE_NOT_IN_SNAPSHOT"),
+    (lambda p:p["facts"][0]["fact_value"].update(normalized_feature_name="Changed"), "UNSUPPORTED_NORMALIZATION"),
+    (lambda p:p.update(snapshot_id=99), "SNAPSHOT_MISMATCH"),
+])
+def test_diagnostic_failure_types(mutation, reason):
+    payload = {"snapshot_id":12,"facts":[fact()]}
+    mutation(payload)
+    result = LLMFactExtractionProvider(config(), session=Session([Response(payload)])).extract(request())
+    assert result.error and not result.candidate_facts
+    assert result.evidence_diagnostics[0]["failure_type"] == reason
+
+
+def test_diagnostics_bound_and_redact_untrusted_text():
+    item = fact()
+    item["evidence_text"] = "Bearer another-secret " + "x" * 1000
+    result = LLMFactExtractionProvider(config(), session=Session([Response(
+        {"snapshot_id":12,"facts":[item]})])).extract(request())
+    diagnostic = result.evidence_diagnostics[0]
+    assert "another-secret" not in repr(diagnostic)
+    assert len(diagnostic["field_value"]) <= 161
+    assert len(diagnostic["evidence_snippet"]) <= 241
+    assert not result.candidate_facts

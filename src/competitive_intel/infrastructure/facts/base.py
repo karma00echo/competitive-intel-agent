@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from competitive_intel.domain.facts import CandidateFact, FactCategory
@@ -30,6 +30,8 @@ class FactExtractionResponse:
     warnings: tuple[str, ...] = ()
     error: str | None = None
     attempts: int = 0
+    http_audit: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    evidence_diagnostics: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
 class FactExtractionProvider(Protocol):
