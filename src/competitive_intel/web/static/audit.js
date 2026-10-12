@@ -7,7 +7,7 @@
   }
   function mode(run) {
     if(!run.final_state) return '运行中 · Provider 请核对工具轨迹';
-    if(run.provider_summary?.search_provider==='serper')return '真实 Serper 搜索 · 事实提取跳过';
+    if(run.provider_summary?.search_provider==='serper')return run.provider_summary.fact_provider==='openai_compatible'?'真实 Serper 搜索 · LLM 证据提取':'真实 Serper 搜索 · 事实提取跳过';
     return run.fact_extraction_status?'Fixture 离线演示 · 非实时研究':'历史默认 Provider 标记 · 请核对工具轨迹，不推断真实或演示模式';
   }
   if(page==='home') {
@@ -62,6 +62,10 @@
       item.insertBefore(node('p',`${call.provider||'Provider 未记录'} · ${call.duration_ms??'—'} ms · ${call.retryable?'可重试':'不可重试'}`),item.lastChild);tools.append(item);
     }
     if(!data.tool_calls.length)empty(tools,'尚无工具调用记录。');
+    for(const call of run.fact_provider_calls||[]) {
+      const item=disclosure(`事实提取 · ${call.model} · ${call.status}`,call,`llm-${call.snapshot_id}`);
+      item.insertBefore(node('p',`${call.reused?'复用同正文已验证事实（未请求模型）':`${call.attempts} 次模型请求`} · ${call.duration_ms} ms · 已确认 ${call.confirmed_count||0} 条 · Token ${call.usage?.total_tokens??'服务未提供 / 未调用'}${call.error_code?' · '+call.error_code:''}`),item.lastChild);tools.append(item);
+    }
     const evidence=$('audit-evidence');evidence.replaceChildren();
     data.sources.forEach(s=>{const item=disclosure(`${s.source_type} · ${s.verification_status}`,s,`source-${s.source_id}`);if(s.url)item.append(link('原始来源',s.url));evidence.append(item)});
     data.facts.forEach(f=>{const item=disclosure(f.display_value,f,`fact-${f.fact_id}`);item.append(link('原始来源',f.source_url));evidence.append(item)});

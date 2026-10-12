@@ -41,8 +41,9 @@
     const expanded=box.querySelector('details')?.open || false;
     const run=data.run, state=run.final_state||run.current_state;
     box.replaceChildren(node('h2',`Agent · ${run.competitor}`));
-    const provider=record.provider || (run.final_state ? data.provider_summary.search_provider : null);
-    box.append(node('p',provider==='serper'?'真实 Serper 搜索 / 真实网页；事实提取跳过。':provider==='fixture'?'Fixture 离线演示 · 不是实时竞品研究结果。':'历史运行 · Provider 以完整审计记录为准。','chat-notice'));
+    const provider=record.provider || data.provider_summary.search_provider;
+    const llm=record.factProvider==='openai_compatible'||data.provider_summary.fact_provider==='openai_compatible';
+    box.append(node('p',provider==='serper'?(llm?'真实搜索 / 真实网页 / LLM 原文证据提取。':'真实 Serper 搜索 / 真实网页；事实提取跳过。'):provider==='fixture'?'Fixture 离线演示 · 不是实时竞品研究结果。':'历史运行 · Provider 以完整审计记录为准。','chat-notice'));
     box.append(node('p',`#${run.run_id} · ${stateLabels[state]||state} · ${run.tool_call_count} 次工具调用`,'chat-status'));
     if(run.final_state) {
       box.append(node('p',`已验证来源 ${run.verified_source_count} · 抓取成功 ${run.page_fetch_success_count} / 失败 ${run.page_fetch_failure_count} · 本次确认事实 ${run.confirmed_fact_count}`));
@@ -84,17 +85,17 @@
   function confirmAnalysis(box,command,record,epoch) {
     box.append(node('p',`将为「${command.name}」创建或刷新档案。请确认数据模式后启动；不会打开 Developer 表单。`));
     const modes=node('div',undefined,'chat-mode'),label=node('label','数据模式 '),mode=node('select');mode.setAttribute('aria-label','数据模式');
-    for(const [value,text] of [['serper','真实搜索 · 跳过事实提取'],['fixture','Fixture 离线演示 · 非实时研究']]) {const option=node('option',text);option.value=value;mode.append(option)}
+    for(const [value,text] of [['serper','真实搜索 · 跳过事实提取'],['llm','真实搜索 + LLM 证据提取（付费）'],['fixture','Fixture 离线演示 · 非实时研究']]) {const option=node('option',text);option.value=value;mode.append(option)}
     const note=node('p',undefined,'chat-notice');
-    function explain(){note.textContent=mode.value==='serper'?'真实搜索和抓取会访问公开网页并写入运行记录；真实 FactExtractionProvider 尚未接入，本次不提取事实。':'Fixture 会使用固定离线样例并写入数据库。仅供演示，不是该产品当前真实事实。';}
+    function explain(){note.textContent=mode.value==='llm'?'将公开网页正文发送给服务端配置的模型服务，会产生 API 费用。只保存有原文证据的事实；失败不会切换到演示数据。':mode.value==='serper'?'真实搜索和抓取会访问公开网页并写入运行记录；本次明确跳过事实提取。':'Fixture 会使用固定离线样例并写入数据库。仅供演示，不是该产品当前真实事实。';}
     mode.onchange=explain;explain();label.append(mode);
     const start=node('button','确认并开始分析');start.type='button';modes.append(label,start);box.append(modes,note);
     start.onclick=async()=>{
       if(epoch!==revision||record.started) return;
-      record.started=true;record.provider=mode.value;persist();start.disabled=true;mode.disabled=true;
+      record.started=true;record.provider=mode.value==='llm'?'serper':mode.value;record.factProvider=mode.value==='llm'?'openai_compatible':'fixture';persist();start.disabled=true;mode.disabled=true;
       note.textContent='正在创建运行，请勿重复提交…';
       try {
-        const accepted=await api('/api/analyses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({competitor_name:command.name,language:'zh',locale:'zh-CN',search_provider:record.provider,skip_fact_extraction:record.provider==='serper',max_tool_calls:20})});
+        const accepted=await api('/api/analyses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({competitor_name:command.name,language:'zh',locale:'zh-CN',search_provider:record.provider,fact_provider:record.factProvider,skip_fact_extraction:mode.value==='serper',max_tool_calls:20})});
         record.runId=accepted.run_id;persist();
         if(epoch===revision) watchRun(box,record,epoch);
       } catch(error) {
@@ -111,7 +112,7 @@
       const command=await api(`/api/analyst/command?text=${encodeURIComponent(record.text)}`);
       if(epoch!==revision) return;
       if(command.action==='unsupported'){box.append(node('p',command.message));return;}
-      if(command.action==='capability'){box.append(node('p','真实自然语言 AgentProvider 和真实事实提取尚未接入。真实搜索运行强制跳过事实提取；不会将 Fixture 事实用于真实网页。每条输入独立解析，不会推断“它”等多轮指代。'));return;}
+      if(command.action==='capability'){box.append(node('p','使用受控命令而非自由多轮 LLM Agent。支持真实搜索 + LLM 原文证据提取（需配置并明确选择），也可以跳过提取。Fixture 不用于真实网页。每条输入独立解析，不会推断“它”等多轮指代。'));return;}
       if(command.action==='analyze'){confirmAnalysis(box,command,record,epoch);return;}
       if(command.action==='run'){record.runId=command.run_id;persist();return watchRun(box,record,epoch);}
       let competitor=null;

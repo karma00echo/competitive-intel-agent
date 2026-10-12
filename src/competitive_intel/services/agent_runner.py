@@ -588,7 +588,9 @@ class AgentRunner:
             return {
                 str(key): (
                     "[REDACTED]"
-                    if any(fragment in str(key).casefold() for fragment in secret_fragments)
+                    if (any(fragment in str(key).casefold() for fragment in secret_fragments)
+                        and not (key in {"prompt_tokens", "completion_tokens", "total_tokens"}
+                                 and type(item) is int and item >= 0))
                     else AgentRunner._safe_value(item)
                 )
                 for key, item in list(value.items())[:50]

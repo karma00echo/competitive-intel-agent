@@ -34,7 +34,7 @@ class AnalysisRequest(BaseModel):
     language: Literal["en", "zh"] | None = None
     locale: str = Field(default="en-US", min_length=2, max_length=20)
     search_provider: Literal["fixture", "serper"] = "fixture"
-    fact_provider: Literal["fixture"] = "fixture"
+    fact_provider: Literal["fixture", "openai_compatible"] = "fixture"
     agent_provider: Literal["fixture"] = "fixture"
     fixture_scenario: Literal[
         "default", "unchanged", "price_changed", "feature_added",
@@ -52,11 +52,12 @@ class AnalysisRequest(BaseModel):
 
     @model_validator(mode="after")
     def real_content_isolation(self) -> "AnalysisRequest":
-        if self.search_provider == "serper" and not self.skip_fact_extraction:
+        if self.search_provider == "serper" and not self.skip_fact_extraction and self.fact_provider == "fixture":
             raise ValueError(
-                "Serper real-content mode requires skip_fact_extraction=true "
-                "until a real fact provider is implemented."
+                "Serper requires a real fact provider or skip_fact_extraction=true."
             )
+        if self.search_provider == "fixture" and self.fact_provider != "fixture":
+            raise ValueError("Fixture search cannot be mixed with real LLM extraction.")
         return self
 
 

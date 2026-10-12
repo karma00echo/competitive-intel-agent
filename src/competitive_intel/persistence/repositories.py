@@ -910,6 +910,19 @@ class FactVersionRepository:
 
 
 class FactObservationRepository:
+    def find_reusable_run(self, session: Session, cache_key: str) -> int | None:
+        """Only a completed, audited LLM extraction may supply unchanged-page facts."""
+        row = _one(session, """
+            SELECT tc.run_id FROM tool_calls tc
+            JOIN agent_runs ar ON ar.id = tc.run_id
+            WHERE ar.status = 'COMPLETED' AND tc.status = 'SUCCEEDED'
+              AND tc.tool_name IN ('extract_competitor_facts', 'extract_facts')
+              AND JSON_CONTAINS(tc.output_summary,
+                  JSON_OBJECT('cache_key', :cache_key), '$.provider_calls')
+            ORDER BY tc.id DESC LIMIT 1
+        """, {"cache_key": cache_key})
+        return int(row["run_id"]) if row else None
+
     def create_idempotent(
         self,
         session: Session,

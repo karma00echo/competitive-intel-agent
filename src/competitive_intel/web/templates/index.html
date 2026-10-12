@@ -16,6 +16,7 @@
     <label class="wide">竞品名称<input id="competitor-name" maxlength="120" required placeholder="Notion、飞书或 Linear"></label>
     <label>语言<select id="language"><option value="en">English</option><option value="zh">中文</option></select></label>
     <label>搜索方式<select id="search-provider"><option value="fixture">Fixture 离线演示</option><option value="serper">Serper 真实搜索</option></select></label>
+    <label>事实 Provider<select id="fact-provider"><option value="fixture">Fixture（真实搜索时仅跳过）</option><option value="openai_compatible">真实 LLM · 需配置 / 付费</option></select></label>
     <label>Fixture 场景<select id="fixture-scenario"><option value="default">默认</option><option value="price_changed">价格变化</option><option value="feature_added">新增功能</option><option value="feature_removed">移除功能</option><option value="page_failure">页面失败</option></select></label>
     <label class="checkbox"><input id="skip-facts" type="checkbox"> 跳过事实提取</label>
     <div id="provider-notice" class="notice wide">Fixture 模式完全离线，适合稳定演示。</div>

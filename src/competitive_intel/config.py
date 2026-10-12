@@ -64,9 +64,14 @@ class SearchSettings:
 @dataclass(frozen=True, slots=True)
 class LLMSettings:
     provider: str = "fixture"
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     model: str | None = None
     endpoint: str | None = None
+    timeout_seconds: float = 45
+    max_input_characters: int = 30_000
+    max_output_tokens: int = 6_000
+    max_retries: int = 1
+    max_calls: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +127,11 @@ class Settings:
                 api_key=getenv("LLM_API_KEY") or None,
                 model=getenv("LLM_MODEL") or None,
                 endpoint=getenv("LLM_ENDPOINT") or None,
+                timeout_seconds=float(getenv("LLM_TIMEOUT_SECONDS", "45")),
+                max_input_characters=int(getenv("LLM_MAX_INPUT_CHARACTERS", "30000")),
+                max_output_tokens=int(getenv("LLM_MAX_OUTPUT_TOKENS", "6000")),
+                max_retries=int(getenv("LLM_MAX_RETRIES", "1")),
+                max_calls=int(getenv("LLM_MAX_CALLS", "8")),
             ),
             agent=AgentSettings(
                 provider=getenv("AGENT_PROVIDER", "fixture"),

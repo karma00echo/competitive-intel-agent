@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
@@ -269,7 +270,11 @@ class AgentToolExecutor:
         context: ControlledRunContext,
     ) -> ToolResult:
         try:
-            return self._handlers[name](arguments, context)
+            result = self._handlers[name](arguments, context)
+            # Persist mode even when a task fails before final summary generation.
+            if name == "get_competitor_profile":
+                result.data.update(self._execution_metadata)
+            return result
         except Exception as exc:
             return ToolResult(
                 False,
@@ -313,6 +318,18 @@ class AgentToolExecutor:
             latest = self._persistence.agent_runs.get_latest_for_competitor(
                 session, competitor["id"]
             )
+            previous = self._persistence.agent_runs.get_previous_successful_with_facts(
+                session, competitor["id"], context.run_id
+            )
+            prior_calls = self._persistence.tool_calls.list_for_run(session, previous["id"]) if previous else []
+        prior_provider = "fixture"  # Legacy runs were fixture-only.
+        for call in prior_calls:
+            payload = call.get("output_summary")
+            payload = json.loads(payload) if isinstance(payload, str) else payload
+            if isinstance(payload, dict):
+                payload = payload.get("summary", payload)
+                prior_provider = payload.get("fact_provider", prior_provider)
+        mode_changed = bool(previous and prior_provider != self._execution_metadata["fact_provider"])
         return ToolResult(
             True,
             {
@@ -321,7 +338,8 @@ class AgentToolExecutor:
                 "normalized_name": competitor["normalized_name"],
                 "verified_source_count": len(sources),
                 "successful_snapshot_count": snapshots,
-                "confirmed_fact_count": facts,
+                "confirmed_fact_count": 0 if mode_changed else facts,
+                "warnings": ["Fact provider changed; establish a new baseline instead of comparing fixture and real facts."] if mode_changed else [],
                 "recent_run_status": latest["status"] if latest else None,
             },
         )
@@ -472,9 +490,13 @@ class AgentToolExecutor:
             }
             for item in result.rejected[:50]
         ]
+        success = bool(result.saved) and not (result.provider != "fixture" and result.errors)
         return ToolResult(
-            bool(result.saved),
+            success,
             {
+                "provider_calls": list(result.provider_calls),
+                "fact_provider": result.provider,
+                "fact_extraction_status": "COMPLETED" if success else "FAILED",
                 "candidate_count": result.candidate_count,
                 "confirmed_count": len(result.saved),
                 "rejected_count": len(result.rejected),
@@ -485,8 +507,8 @@ class AgentToolExecutor:
                 "warnings": list(result.warnings[:20]),
                 "errors": list(result.errors[:20]),
             },
-            error_code=None if result.saved else "NO_CONFIRMED_FACTS",
-            error_message=None if result.saved else "No current facts passed evidence validation.",
+            error_code=None if success else "FACT_EXTRACTION_FAILED",
+            error_message=None if success else "No complete evidence-validated extraction; see provider audit.",
             retryable=False,
         )
 

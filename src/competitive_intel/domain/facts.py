@@ -159,3 +159,4 @@ class FactExtractionResult:
     historical_reuse_count: int
     warnings: tuple[str, ...]
     errors: tuple[str, ...]
+    provider_calls: tuple[dict[str, Any], ...] = ()

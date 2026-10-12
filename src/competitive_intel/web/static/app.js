@@ -18,9 +18,10 @@ async function loadHome(){
   try{const data=await api("/api/runs?limit=8");const target=$("recent-runs");target.replaceChildren();data.items.forEach(r=>target.append(listItem(r.competitor,`${r.run_mode||"待选择"} · ${stateLabels[r.final_state||r.current_state]||r.current_state}`,`/developer/runs/${r.run_id}`,[fmtTime(r.started_at),`工具 ${r.tool_call_count}`])));if(!data.items.length)empty(target)}catch(e){empty($("recent-runs"),e.message)}
   try{const data=await api("/api/competitors?limit=12");const target=$("competitors");target.replaceChildren();data.items.forEach(c=>target.append(listItem(c.name,c.official_homepage||"尚无已验证主页",`/competitors/${c.competitor_id}`,[`来源 ${c.verified_source_count}`,`事实 ${c.current_fact_count}`])));if(!data.items.length)empty(target)}catch(e){empty($("competitors"),e.message)}
   const provider=$("search-provider"),skip=$("skip-facts"),notice=$("provider-notice");
-  function mode(){const real=provider.value==="serper";skip.checked=real;skip.disabled=real;notice.textContent=real?"真实搜索与真实网页抓取；由于真实 Fact Provider 尚未接入，事实提取将强制跳过。":"Fixture 模式完全离线，适合稳定演示。";notice.className=`notice wide${real?" warn":""}`}
-  provider.addEventListener("change",mode);mode();
-  $("analysis-form").addEventListener("submit",async(event)=>{event.preventDefault();const error=$("form-error");error.hidden=true;const button=event.target.querySelector("button");button.disabled=true;button.textContent="正在创建运行…";try{const language=$("language").value;const accepted=await api("/api/analyses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({competitor_name:$("competitor-name").value,language,locale:language==="zh"?"zh-CN":"en-US",search_provider:provider.value,fact_provider:"fixture",agent_provider:"fixture",fixture_scenario:$("fixture-scenario").value,skip_fact_extraction:skip.checked,max_tool_calls:20})});location.href=`/runs/${accepted.run_id}`}catch(e){error.textContent=e.message;error.hidden=false;button.disabled=false;button.textContent="开始分析"}});
+  const factProvider=$("fact-provider");
+  function mode(){const real=provider.value==="serper";factProvider.disabled=!real;if(!real)factProvider.value="fixture";skip.checked=real&&factProvider.value==="fixture";skip.disabled=skip.checked;notice.textContent=real?(factProvider.value==="openai_compatible"?"真实 LLM 证据提取：需服务端配置，会产生 API 费用；失败不切换 Fixture。":"真实搜索与网页抓取；明确跳过事实提取。不会使用 Fixture 事实。以真实 LLM 模式启动可执行证据提取。") :"Fixture 模式完全离线，适合稳定演示。";notice.className=`notice wide${real?" warn":""}`}
+  provider.addEventListener("change",mode);factProvider.addEventListener("change",mode);mode();
+  $("analysis-form").addEventListener("submit",async(event)=>{event.preventDefault();const error=$("form-error");error.hidden=true;const button=event.target.querySelector("button");button.disabled=true;button.textContent="正在创建运行…";try{const language=$("language").value;const accepted=await api("/api/analyses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({competitor_name:$("competitor-name").value,language,locale:language==="zh"?"zh-CN":"en-US",search_provider:provider.value,fact_provider:factProvider.value,agent_provider:"fixture",fixture_scenario:$("fixture-scenario").value,skip_fact_extraction:skip.checked,max_tool_calls:20})});location.href=`/runs/${accepted.run_id}`}catch(e){error.textContent=e.message;error.hidden=false;button.disabled=false;button.textContent="开始分析"}});
 }
 
 function progressFor(state){const i=stages.indexOf(state);return Math.max(4,Math.round((i+1)/stages.length*100))}
@@ -238,7 +239,7 @@ async function handleCommand(raw){
     location.assign(`/competitors/${competitor.competitor_id}#changes`);return;
   }
   if(/^为什么本次没有提取事实[？?]?$/i.test(input)){
-    feedback.textContent="真实网页内容不会使用 Fixture 事实。真实 FactExtractionProvider 尚未接入时，本次事实提取会明确跳过。";return;
+    feedback.textContent="此 Workspace 入口的真实模式跳过事实提取。需要真实 LLM 证据提取时，请在首页或 Developer 明确选择；不会使用 Fixture 事实替代。";return;
   }
   feedback.textContent="当前版本仅支持竞品分析、刷新、报告和运行查询。真实自然语言 AgentProvider 尚未接入。";
 }

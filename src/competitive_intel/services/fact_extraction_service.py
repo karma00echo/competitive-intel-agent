@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -12,11 +13,11 @@ from competitive_intel.domain.fact_comparison import FactNormalizer
 from competitive_intel.domain.fact_normalization import normalize_fact
 from competitive_intel.domain.fact_schema import REQUIRED
 from competitive_intel.domain.facts import (
-    EvidenceCheckStatus, FactCategory, FactExtractionLimits,
+    CandidateFact, EvidenceCheckStatus, FactCategory, FactExtractionLimits,
     FactExtractionResult, RejectedFact, SavedFact,
 )
 from competitive_intel.infrastructure.facts.base import (
-    FactExtractionProvider, FactExtractionRequest,
+    FactExtractionProvider, FactExtractionRequest, FactExtractionResponse,
 )
 from competitive_intel.persistence import Persistence
 
@@ -73,6 +74,7 @@ class FactExtractionService:
             )
 
         owns_run = run_id is None
+        policy_key = getattr(self._provider, "policy_key", None)
         stage_id: int | None = None
         with self._persistence.transaction() as session:
             all_sources = self._persistence.sources.list_verified(
@@ -105,11 +107,14 @@ class FactExtractionService:
             warnings.append(
                 f"Page limit reached; {len(all_sources) - len(sources)} sources were skipped."
             )
+            if policy_key:
+                errors.append("PAGE_LIMIT_INCOMPLETE_EXTRACTION")
 
         source_ids: list[int] = []
         snapshot_ids: list[int] = []
         model_calls = 0
         call_index = 0
+        provider_calls: list[dict] = []
         for source in sources:
             source_ids.append(source["id"])
             with self._persistence.transaction() as session:
@@ -134,10 +139,15 @@ class FactExtractionService:
                 continue
             if model_calls >= self._limits.max_model_calls:
                 warnings.append("Model call limit reached.")
+                if policy_key:
+                    errors.append("MODEL_CALL_LIMIT_INCOMPLETE_EXTRACTION")
                 break
             model_calls += 1
             call_index += 1
             content = snapshot["clean_content"]
+            if policy_key and len(content) > self._limits.max_input_characters:
+                errors.append(f"Snapshot {snapshot['id']}: INPUT_TOO_LONG_NO_EXTRACTION")
+                continue
             provider_content = content[: self._limits.max_input_characters]
             if len(content) > len(provider_content):
                 warnings.append(
@@ -161,9 +171,24 @@ class FactExtractionService:
                         },
                     )
             started = perf_counter()
+            cache_key = sha256(f"{source['id']}:{policy_key}:{content}".encode()).hexdigest() if policy_key else None
+            reused = False
             try:
-                response = self._provider.extract(
-                    FactExtractionRequest(
+                response = None
+                if cache_key:
+                    with self._persistence.transaction() as session:
+                        cached_run = self._persistence.fact_observations.find_reusable_run(session, cache_key)
+                        observations = self._persistence.fact_observations.list_for_run(session, cached_run) if cached_run else []
+                    rows = [row for row in observations if row["source_id"] == source["id"]]
+                    if rows:
+                        response = FactExtractionResponse(tuple(CandidateFact(
+                            FactCategory(row["fact_category"]),
+                            json.loads(row["fact_value"]) if isinstance(row["fact_value"], str) else row["fact_value"],
+                            row["value_text"], row["observed_evidence"], float(row["observed_confidence"]),
+                        ) for row in rows), self._provider.name, self._provider.settings.model or "", "", {})
+                        reused = True
+                if response is None:
+                    response = self._provider.extract(FactExtractionRequest(
                         competitor_name,
                         source["source_type"],
                         source["url"],
@@ -172,10 +197,11 @@ class FactExtractionService:
                         allowed,
                         {item.value: REQUIRED[item] for item in allowed},
                         self._limits.max_facts_per_page,
-                    )
-                )
+                    ))
             except Exception as exc:
-                message = f"Source {source['id']} provider error: {type(exc).__name__}: {exc}"
+                message = f"Source {source['id']} provider error: {type(exc).__name__}"
+                if not policy_key:
+                    message += f": {exc}"
                 errors.append(message)
                 if tool_call_id is not None:
                     self._finish_tool(
@@ -191,8 +217,16 @@ class FactExtractionService:
                     f"{self._limits.max_facts_per_page} facts; extras were ignored."
                 )
             warnings.extend(response.warnings)
+            audit = {"source_id": source["id"], "snapshot_id": snapshot["id"],
+                     "provider": response.provider, "model": response.model,
+                     "duration_ms": max(0, int((perf_counter() - started) * 1000)),
+                     "usage": response.usage, "attempts": response.attempts,
+                     "reused": reused, "candidate_count": len(candidates),
+                     "status": "FAILED" if response.error else "SUCCEEDED", "error_code": response.error}
+            provider_calls.append(audit)
             if response.error:
                 errors.append(f"Source {source['id']}: {response.error}")
+                candidates = ()
             confirmed_for_page = 0
             rejected_for_page = 0
             seen_keys: set[str] = set()
@@ -306,6 +340,7 @@ class FactExtractionService:
                     )
                     if (
                         current_fact
+                        and (not policy_key or reused)
                         and (
                             current_fact["normalized_value_hash"] == value_hash
                             or self._history_normalizer.canonical_json(
@@ -380,6 +415,12 @@ class FactExtractionService:
                         extraction_warnings=normalized.extraction_warnings,
                     )
                 )
+            audit["confirmed_count"] = confirmed_for_page
+            audit["rejected_count"] = rejected_for_page
+            if cache_key and confirmed_for_page and not response.error and not rejected_for_page:
+                audit["cache_key"] = cache_key
+            if policy_key and rejected_for_page:
+                errors.append(f"Source {source['id']}: EVIDENCE_REJECTED")
             if tool_call_id is not None:
                 self._finish_tool(
                     tool_call_id,
@@ -387,14 +428,15 @@ class FactExtractionService:
                     perf_counter() - started,
                     len(candidates), confirmed_for_page, rejected_for_page,
                     response.error,
+                    audit,
                 )
 
         if owns_run:
             assert stage_id is not None
             with self._persistence.transaction() as session:
-                for fact in self._persistence.fact_observations.list_for_run(
+                for fact in ([] if errors and policy_key else self._persistence.fact_observations.list_for_run(
                     session, run_id
-                ):
+                )):
                     self._persistence.fact_versions.activate(
                         session, fact["id"], "BASELINE"
                     )
@@ -402,16 +444,17 @@ class FactExtractionService:
                         session, run_id, fact["id"], "BASELINE"
                     )
                 self._persistence.stage_events.finish(
-                    session, stage_id, status="SUCCEEDED"
+                    session, stage_id, status="FAILED" if errors and policy_key else "SUCCEEDED"
                 )
                 self._persistence.agent_runs.finish(
-                    session, run_id, status="COMPLETED", current_state="COMPLETED"
+                    session, run_id, status="FAILED" if errors and policy_key else "COMPLETED",
+                    current_state="FAILED" if errors and policy_key else "COMPLETED"
                 )
         return FactExtractionResult(
             competitor_name, competitor["id"], run_id, self._provider.name,
             tuple(source_ids), tuple(snapshot_ids), candidate_count, tuple(saved),
             tuple(rejected), duplicate_count, historical_reuse_count,
-            tuple(warnings), tuple(errors),
+            tuple(warnings), tuple(errors), tuple(provider_calls),
         )
 
     def _finish_tool(
@@ -423,6 +466,7 @@ class FactExtractionService:
         confirmed: int,
         rejected: int,
         error: str | None,
+        audit: dict | None = None,
     ) -> None:
         with self._persistence.transaction() as session:
             self._persistence.tool_calls.finish(
@@ -433,6 +477,7 @@ class FactExtractionService:
                     "candidate_count": candidates,
                     "confirmed_count": confirmed,
                     "rejected_count": rejected,
+                    "provider_calls": [audit] if audit else [],
                 },
                 duration_ms=max(0, int(elapsed * 1000)),
                 error_code="PROVIDER_ERROR" if error else None,

@@ -12,6 +12,7 @@ from competitive_intel.domain.agent import AgentRunnerLimits
 from competitive_intel.domain.names import normalize_competitor_name
 from competitive_intel.infrastructure.agent import FixtureAgentProvider
 from competitive_intel.infrastructure.facts import FixtureFactExtractionProvider
+from competitive_intel.infrastructure.facts.llm_provider import LLMFactExtractionProvider
 from competitive_intel.infrastructure.http.fixture_fetcher import FixturePageFetcher
 from competitive_intel.infrastructure.http.requests_fetcher import RequestsFetcher
 from competitive_intel.infrastructure.search.factory import create_search_provider
@@ -57,14 +58,16 @@ def build_runner(
     source_service = SourceDiscoveryService(persistence, search, fetcher)
     snapshot_service = SnapshotService(persistence, fetcher)
     fact_service = FactExtractionService(
-        persistence, FixtureFactExtractionProvider(scenario=scenario)
+        persistence, (LLMFactExtractionProvider(settings.llm)
+                      if request.fact_provider == "openai_compatible"
+                      else FixtureFactExtractionProvider(scenario=scenario))
     )
     tools = AgentToolExecutor(
         persistence,
         source_service,
         snapshot_service,
         fact_service,
-        skip_fact_extraction=request.skip_fact_extraction or real_search,
+        skip_fact_extraction=request.skip_fact_extraction,
         search_provider=search.name,
         fetch_mode="real" if real_search else "fixture",
         agent_provider=request.agent_provider,

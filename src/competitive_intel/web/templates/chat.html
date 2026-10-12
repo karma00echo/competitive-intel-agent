@@ -22,7 +22,7 @@
   <div class="chat-composer-bottom"><span>受控命令 · 无自由多轮推理 · Ctrl / ⌘ + Enter</span><button type="submit" id="chat-send" aria-label="发送消息">{{ icon('arrow') }}</button></div>
 </form>
 <p id="chat-error" role="alert" hidden></p>
-<p class="chat-limit">支持分析、变化、价格、来源和报告查询。真实搜索跳过尚未接入的事实提取；跨竞品自然语言比较暂不支持。演示模式需明确确认。</p>
+<p class="chat-limit">支持分析、变化、价格、来源和报告查询。可选择真实搜索与 LLM 证据提取（需服务端配置，会产生 API 费用），或跳过提取。跨竞品自然语言比较暂不支持；Fixture 仅供演示。</p>
 <section id="chat-shortcuts" class="ed-entry-grid" aria-label="Quick tasks">
 {% for prompt, symbol, title, description in [('分析 ', 'competitors', 'Track Competitors', '建立竞品档案 · 输入产品名后确认启动'), ('最近有哪些变化', 'search', 'Review Signals', '查看已有产品、功能和定价变化'), ('查看 ', 'analyst', 'Analyze Competitors', '查询已有价格、来源与报告 · 暂不支持跨竞品推理')] %}
 <button type="button" class="ed-entry" data-prompt="{{ prompt }}"><span class="ed-entry-icon">{{ icon(symbol) }}</span><h2>{{ title }}</h2><p>{{ description }}</p></button>

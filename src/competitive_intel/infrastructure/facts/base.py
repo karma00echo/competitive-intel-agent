@@ -29,6 +29,7 @@ class FactExtractionResponse:
     usage: dict[str, int]
     warnings: tuple[str, ...] = ()
     error: str | None = None
+    attempts: int = 0
 
 
 class FactExtractionProvider(Protocol):

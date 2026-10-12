@@ -99,6 +99,21 @@ def _page_comparison_summary(calls: list[dict[str, Any]]) -> dict[str, int]:
 
 def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any]:
     summary = _run_summary_from_calls(calls)
+    extraction = {}
+    for call in calls:
+        payload = decode_json(call.get("output_summary"))
+        if not isinstance(payload, dict):
+            continue
+        if call["tool_name"] == "get_competitor_profile":
+            for key in ("search_provider", "fetch_mode", "agent_provider", "fact_provider"):
+                if key in payload:
+                    summary.setdefault(key, payload[key])
+        if call["tool_name"] == "extract_competitor_facts":
+            extraction = payload
+    if extraction:
+        summary.setdefault("fact_extraction_status", extraction.get("fact_extraction_status"))
+        summary.setdefault("confirmed_fact_count", extraction.get("confirmed_count", 0))
+        summary.setdefault("errors", extraction.get("errors", []))
     final_state = summary.get("final_state")
     if not final_state:
         final_state = "FAILED" if run["status"] == "FAILED" else (
@@ -139,6 +154,7 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
         "page_fetch_failure_count": summary.get("page_fetch_failure_count", 0),
         "verified_source_count": summary.get("verified_source_count", 0),
         "confirmed_fact_count": summary.get("confirmed_fact_count", 0),
+        "fact_provider_calls": _sanitize(extraction.get("provider_calls", [])),
     }
 
 
