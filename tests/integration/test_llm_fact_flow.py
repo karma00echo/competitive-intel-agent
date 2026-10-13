@@ -60,6 +60,10 @@ class Transport:
             payload["facts"].append({**deepcopy(payload["facts"][0]), "evidence_text":"invented"})
         elif self.mode == "duplicate":
             payload["facts"].append(deepcopy(payload["facts"][0]))
+        elif self.mode == "conflict":
+            second = deepcopy(payload["facts"][0])
+            second["fact_value"]["feature_description"] = "teams edit documents"
+            payload["facts"].append(second)
         elif self.mode == "empty":
             payload["facts"] = []
         data = {"choices":[{"finish_reason":"stop","message":{"content":json.dumps(payload)}}],
@@ -248,6 +252,20 @@ def test_duplicate_page_does_not_fail_run(persistence):
     assert result.summary.confirmed_fact_count == 1
     with persistence.transaction() as session:
         assert len(persistence.product_facts.list_for_run(session, result.run_id)) == 1
+
+
+def test_conflicting_values_are_both_rejected_and_audited(persistence):
+    seed(persistence)
+    result = runner(persistence, Transport(mode="conflict")).run("Acme")
+    assert result.final_state == AgentState.FAILED
+    with persistence.transaction() as session:
+        assert not persistence.product_facts.list_for_run(session, result.run_id)
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+    output = next(json.loads(c["output_summary"]) for c in calls if c["tool_name"] == "extract_competitor_facts")
+    paired = output["provider_calls"][0]["fact_rejections"][1]
+    assert paired["source_id"] > 0 and paired["snapshot_id"] > 0
+    assert paired["old_value"] != paired["new_value"]
+    assert paired["canonical_identity"] == "feature.docs"
 
 
 def test_empty_page_can_complete_and_cannot_remove_prior_fact(persistence):

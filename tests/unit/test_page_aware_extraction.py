@@ -53,8 +53,50 @@ def test_conflicting_identity_is_not_silently_merged():
     second["fact_value"]["feature_description"] = "teams edit documents"
     result = extract([fact(),second])
     assert result.error == "CONFLICTING_FACT_IDENTITY"
-    assert len(result.candidate_facts) == 1
-    assert len(result.fact_rejections) == 1
+    assert not result.candidate_facts
+    assert len(result.fact_rejections) == 2
+    paired = result.fact_rejections[1]
+    assert paired["canonical_identity"] == "feature.docs"
+    assert paired["fact_type"] == "FEATURE"
+    assert paired["snapshot_id"] == 12
+    assert paired["old_normalized_value"] != paired["new_normalized_value"]
+    assert paired["old_evidence"] == paired["new_evidence"] == TEXT
+    assert paired["resolution"] == "REJECT_ALL_CONFLICTING_VALUES"
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_positioning_conflict_rejects_both_orders(reverse):
+    def positioning(quote):
+        return {"fact_category":"POSITIONING", "fact_value":{
+            "primary_positioning":quote,"public_description":quote,
+            "target_users":[],"primary_use_cases":[],"deployment_type":None},
+            "evidence_text":quote,"confidence":0.9}
+    items = [positioning("A workspace for teams."), positioning("Tools for research.")]
+    if reverse:
+        items.reverse()
+    result = extract(items, kind="HOMEPAGE", content="A workspace for teams.\nTools for research.",
+                     allowed=(FactCategory.POSITIONING,))
+    assert result.error == "CONFLICTING_FACT_IDENTITY"
+    assert not result.candidate_facts
+    assert {r["canonical_identity"] for r in result.fact_rejections} == {"positioning.primary"}
+
+
+@pytest.mark.parametrize("quote,accepted", [
+    ("New editor\nVideo unavailable.\nEdit together.", True),
+    ("New editor  Video unavailable.\r\n  Edit together.", True),
+    ("New editor\nEdit together.", False),
+    ("New editor lets everyone collaborate.", False),
+])
+def test_contiguous_evidence_cannot_skip_intervening_text(quote, accepted):
+    item = release()
+    item["evidence_text"] = quote
+    result = extract([item], kind="CHANGELOG",
+                     content="New editor\nVideo unavailable.\nEdit together.",
+                     allowed=(FactCategory.PRODUCT_UPDATE,))
+    assert (result.error is None) == accepted
+    if not accepted:
+        assert result.error == "EVIDENCE_NOT_FOUND"
+        assert not result.candidate_facts
 
 
 def price(currency=None, period=None):

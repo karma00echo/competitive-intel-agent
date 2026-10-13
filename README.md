@@ -121,6 +121,14 @@ diagnostics, skipped duplicates and page status:
 Envelope errors reject the response. Item schema/evidence errors reject only that
 item. Identical verified identity + canonical value keeps the first occurrence;
 conflicting values with the same identity are errors, not silently merged.
+All values of a conflicting identity are rejected (neither first nor last wins).
+Bounded conflict audit pairs contain identity, type, indices, original/canonical
+values and evidence plus source/snapshot IDs. Old audits cannot reconstruct values
+that were not retained. Homepage prompts allow at most one primary POSITIONING
+fact to match the unchanged `positioning.primary` identity. Quote instructions
+explicitly retain intervening boilerplate/video placeholders; deleting such text
+would splice discontinuous evidence. Existing Unicode/whitespace normalization
+is unchanged; no fuzzy matching or automatic quote repair is performed.
 Partial-error facts remain pending rather than becoming an active baseline;
 partial/error pages cannot supply cached results or reach comparison/reporting.
 NO_FACTS does not trigger baseline replacement. Existing history comparison treats

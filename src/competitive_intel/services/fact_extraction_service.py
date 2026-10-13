@@ -231,7 +231,10 @@ class FactExtractionService:
             audit["page_status"] = response.page_status
             audit["source_type"] = source["source_type"]
             audit["returned_fact_count"] = max(response.returned_fact_count, len(candidates))
-            audit["fact_rejections"] = list(response.fact_rejections)
+            audit["fact_rejections"] = [
+                {**item, "source_id": source["id"], "snapshot_id": snapshot["id"]}
+                for item in response.fact_rejections
+            ]
             audit["duplicates"] = list(response.duplicates)
             duplicate_count += len(response.duplicates)
             audit["http_audit"] = list(response.http_audit)
