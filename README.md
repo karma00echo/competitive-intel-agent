@@ -2,6 +2,21 @@
 
 ## Stage 9.1: real LLM fact extraction
 
+Pricing extraction keeps raw `plan_name` grounded in a contiguous quote. The
+provider derives `normalized_plan_name` with the existing server `slug()` only
+when the model's name is deterministically equivalent; a different plan is still
+rejected. `SERVER_PLAN_SLUG` audits retain the bounded model name, source name,
+and derived value. Homepage audience lists must not infer teams from companies.
+
+Price period and payment commitment are separate: `/month` supports `MONTH`,
+while `paid annually` / `paid monthly` support `ANNUAL_BILLING` /
+`MONTHLY_BILLING`. No schema change is made. There is no DOMAIN or per-N-credits
+unit enum: those dimensions remain unknown and the original quantity stays in
+evidence. `monthly credits` alone is not a billing schedule. A bare dollar sign
+does not establish USD. Quotes must include the price subject and amount in one
+continuous source span, including any intervening text. Null fields use the
+existing audited UNKNOWN adapter; they do not mean a free or flat-rate product.
+
 The Chat-first home and Developer launcher now offer three explicit modes:
 Fixture (offline demonstration), Serper + real fetching with extraction skipped,
 and Serper + `openai_compatible` evidence-first extraction. The controlled Agent

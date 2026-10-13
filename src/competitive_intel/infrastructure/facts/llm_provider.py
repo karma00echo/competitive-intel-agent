@@ -14,6 +14,7 @@ from competitive_intel.config import LLMSettings
 from competitive_intel.domain.evidence import EvidenceChecker, normalized_evidence
 from competitive_intel.domain.fact_schema import REQUIRED
 from competitive_intel.domain.fact_comparison import FactNormalizer
+from competitive_intel.domain.fact_normalization import slug
 from competitive_intel.domain.facts import (
     BillingCommitment, BillingPeriod, BillingUnit, CandidateFact, EvidenceCheckStatus,
     FactCategory, FeatureCategory, FeatureStatus, PlanPublicStatus, PricePublicStatus,
@@ -21,7 +22,7 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-v6-single-positioning-contiguous-evidence"
+POLICY_VERSION = "quoted-facts-v8-server-plan-name-billing-quotes"
 PAGE_CATEGORIES = {
     "HOMEPAGE": (FactCategory.POSITIONING, FactCategory.FEATURE),
     "FEATURES": (FactCategory.FEATURE,),
@@ -35,7 +36,11 @@ positioning identity (positioning.primary). Output at most ONE POSITIONING fact
 for the product's explicit primary positioning, not one per slogan or sentence.
 If no single supported primary positioning can be selected, omit POSITIONING.
 Do not combine competing slogans into a new statement. Do not turn navigation
-links into facts. Never infer plans, prices, availability or status from website presence.""",
+links into facts. Never infer plans, prices, availability or status from website presence.
+target_users and primary_use_cases are literal quoted lists, not audience classifications.
+Never substitute teams for companies (or vice versa). A slogan mentioning companies
+does not require an audience list: return target_users=[] when no explicit audience
+can be copied from the SAME evidence. Do not fill lists merely because keys are required.""",
     "FEATURES": """FEATURES contract: prioritize feature_name and feature_description.
 Quote a contiguous block that includes both. Category may use only explicit label
 or defined aliases. Missing status, availability and related_plan must be null.
@@ -49,7 +54,30 @@ Do not infer month/year from page structure, multiply/divide prices, or infer
 billing commitment from monthly equivalent prices. Use null for unsupported enum
 dimensions. Do not infer FREE or zero from absent prices. Copy explicitly listed
 plan features only from that plan's same quoted block. Skip prices whose plan
-cannot be linked within one quote. Amount must be a quoted numeric string.""",
+cannot be linked within one quote. Amount must be a quoted numeric string.
+Keep billing_period, billing_unit and billing_commitment independent. USAGE_BASED
+is not a synonym for MONTH, and USAGE is not a precise credit quantity. The current
+unit enum has no CREDITS or per-N-credits representation. Do not force credit prices
+into USAGE. For '$10 per 1,000 monthly Notion credits', amount may be '10', but
+currency, billing_period, billing_unit and billing_commitment must be null:
+'monthly' modifies credits, not an explicit billing schedule. Preserve the entire
+quantity and qualification in the evidence. Do not divide 10 by 1,000. Only an
+explicit billing statement such as 'billed monthly' supports monthly billing.
+If the schema cannot express a quoted dimension precisely, leave it null rather
+than select the closest enum. Never infer usage-based billing from a credit price.
+For PLAN, copy plan_name literally. normalized_plan_name is server-owned; echo
+plan_name in that field. The server computes its deterministic slug, not a semantic name.
+For PRICE, start the quote at the subject heading when the following description
+contains its price. Include ALL text between heading and price; a description-only
+quote without the subject name is invalid. If no contiguous span supports both,
+omit that fact. Do not invent a plan name for an unnamed price.
+Separate price alternatives into individual facts without mixing their dimensions:
+'$8/month/domain paid annually' has amount 8, period MONTH, commitment ANNUAL_BILLING;
+'$10/month per domain paid monthly' has amount 10, period MONTH, commitment MONTHLY_BILLING.
+For both, unit is null (no DOMAIN enum), currency null for bare $. Paid annually
+describes payment commitment, NOT a YEAR price period. Use only the dimension
+attached to that amount, not a neighboring alternative. Explicit mappings:
+paid annually -> ANNUAL_BILLING; paid monthly -> MONTHLY_BILLING.""",
     "CHANGELOG": """CHANGELOG contract: output PRODUCT_UPDATE only. Copy update_title
 and summary verbatim from one contiguous release block. Keep different releases
 separate. published_date must be null unless an explicit ISO date occurs in that
@@ -142,8 +170,21 @@ def output_schema(request: FactExtractionRequest) -> dict:
                                "enum": [item.value for item in enum] + ([None] if nullable else [])}
             elif key in LIST_FIELDS:
                 fields[key] = {"type": "array", "items": {"type": "string"}}
+                if key == "target_users":
+                    fields[key]["description"] = (
+                        "Exact audience words copied from this fact's evidence; [] if absent. "
+                        "Never infer teams from companies or paraphrase an audience."
+                    )
             else:
                 fields[key] = {"type": ["string", "null"] if key in OPTIONAL_FIELDS or (category.value, key) in NULL_SENTINELS else "string"}
+            if category == FactCategory.PRICE and key in {
+                "billing_period", "billing_unit", "billing_commitment"
+            }:
+                fields[key]["description"] = (
+                    "Explicitly quoted billing dimension only; null if unsupported. "
+                    "Per 1,000 monthly credits does not establish a billing schedule "
+                    "or an exactly representable unit: return null for this dimension."
+                )
         variants.append(_object({
             "fact_category": {"type": "string", "enum": [category.value]},
             "fact_value": _object(fields),
@@ -217,7 +258,10 @@ def _ground(candidate: CandidateFact, content: str, url: str, *,
     for key, value in candidate.fact_value.items():
         if key.startswith("normalized_"):
             original = key.removeprefix("normalized_")
-            if value != candidate.fact_value[original]:
+            expected = (slug(candidate.fact_value[original])
+                        if candidate.fact_category == FactCategory.PLAN and key == "normalized_plan_name"
+                        else candidate.fact_value[original])
+            if value != expected:
                 reject("UNSUPPORTED_NORMALIZED_NAME", key, value,
                        "UNSUPPORTED_NORMALIZATION", "exact_original_name")
             continue
@@ -236,8 +280,8 @@ def _ground(candidate: CandidateFact, content: str, url: str, *,
                 # OTHER is a non-semantic category; PUBLIC means this public page states it.
                 continue
             aliases = {"MONTH": ("month", "monthly", "月"), "YEAR": ("year", "annual", "年"),
-                       "USER": ("user", "seat", "用户"), "ANNUAL_BILLING": ("billed annually", "annual billing"),
-                       "MONTHLY_BILLING": ("billed monthly", "monthly billing"),
+                       "USER": ("user", "seat", "用户"), "ANNUAL_BILLING": ("billed annually", "annual billing", "paid annually"),
+                       "MONTHLY_BILLING": ("billed monthly", "monthly billing", "paid monthly"),
                        "CONTACT_SALES": ("contact sales", "联系销售"), "FREE": ("free", "免费"),
                        "AVAILABLE": ("available", "可用"), "NOT_DISCLOSED": ("not disclosed",)}
             if not any(term in evidence for term in aliases.get(value, (value.lower().replace("_", " "),))):
@@ -397,6 +441,19 @@ class LLMFactExtractionProvider:
                         grounding_errors.append("INVALID_SCHEMA")
                         fact_rejections.append({"fact_index": fact_index, "error_code": "INVALID_SCHEMA"})
                         continue
+                    if item["fact_category"] == "PLAN":
+                        value = item["fact_value"]
+                        canonical_name = slug(value["plan_name"])
+                        model_name = value["normalized_plan_name"]
+                        # Accept only equivalent surface forms, never another plan.
+                        if slug(model_name) == canonical_name:
+                            value["normalized_plan_name"] = canonical_name
+                            contract_adaptations.append({"fact_index": fact_index,
+                                "field_name": "normalized_plan_name",
+                                "model_value": _diagnostic_text(model_name, 160),
+                                "original_plan_name": _diagnostic_text(value["plan_name"], 160),
+                                "stored_value": _diagnostic_text(canonical_name, 160),
+                                "reason": "SERVER_PLAN_SLUG", "snapshot_id": request.snapshot_id})
                     # Legacy domain enums cannot store null. These sentinels assert
                     # no classification/status; never replace a non-null model value.
                     for (category, field), sentinel in NULL_SENTINELS.items():
