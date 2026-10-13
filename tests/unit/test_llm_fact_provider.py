@@ -95,9 +95,8 @@ def test_strict_output_binding_usage_no_tools_or_secrets_in_prompt():
     (lambda p: p["facts"][0].update(confidence=2), "INVALID_SCHEMA"),
     (lambda p: p["facts"][0].update(confidence=True), "INVALID_SCHEMA"),
     (lambda p: p["facts"][0].update(fact_category="PRICE"), "INVALID_SCHEMA"),
-    (lambda p: p["facts"].append(fact()), "DUPLICATE_FACT_IDENTITY"),
 ])
-def test_rejects_entire_invalid_page(mutation, error):
+def test_rejects_invalid_envelope_or_single_invalid_fact(mutation, error):
     payload = {"snapshot_id": 12, "facts": [fact()]}
     mutation(payload)
     result = LLMFactExtractionProvider(config(), session=Session([Response(payload)])).extract(request())
@@ -146,7 +145,8 @@ def test_refusal_truncation_invalid_json_no_facts_and_unconfigured():
         session = Session([Response(choices=[{"finish_reason":finish,"message":message}])])
         assert LLMFactExtractionProvider(config(),session=session).extract(request()).error == error
     empty = LLMFactExtractionProvider(config(),session=Session([Response({"snapshot_id":12,"facts":[]})])).extract(request())
-    assert not empty.candidate_facts and "NO_VERIFIABLE_FACTS" in empty.warnings
+    assert not empty.candidate_facts and empty.page_status == "NO_FACTS"
+    assert empty.error is None and empty.warnings
     session = Session()
     assert LLMFactExtractionProvider(config(api_key=None),session=session).extract(request()).error == "LLM_CONFIGURATION_REQUIRED"
     assert not session.calls

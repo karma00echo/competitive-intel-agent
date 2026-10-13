@@ -490,7 +490,11 @@ class AgentToolExecutor:
             }
             for item in result.rejected[:50]
         ]
-        success = bool(result.saved) and not (result.provider != "fixture" and result.errors)
+        processed_without_error = bool(result.provider_calls) and all(
+            call.get("page_status") in {"SUCCEEDED", "NO_FACTS"}
+            for call in result.provider_calls
+        )
+        success = (bool(result.saved) or processed_without_error) and not (result.provider != "fixture" and result.errors)
         return ToolResult(
             success,
             {
@@ -541,6 +545,11 @@ class AgentToolExecutor:
     def establish_baseline(self, context: ControlledRunContext) -> int:
         if context.competitor_id is None:
             raise ValueError("Cannot establish a baseline without a competitor.")
+        extraction = context.tool_results.get("extract_competitor_facts")
+        if extraction and any(call.get("page_status") == "NO_FACTS"
+                              for call in extraction.data.get("provider_calls", [])):
+            context.warnings.append("NO_FACTS coverage is not proof of absence; baseline replacement skipped.")
+            return 0
         return self._history.establish_baseline(
             context.competitor_id, context.run_id
         )

@@ -215,7 +215,7 @@ class FactExtractionService:
                     )
                 continue
             candidates = response.candidate_facts[: self._limits.max_facts_per_page]
-            candidate_count += len(candidates)
+            candidate_count += max(response.returned_fact_count, len(candidates))
             if len(response.candidate_facts) > len(candidates):
                 warnings.append(
                     f"Source {source['id']} returned more than "
@@ -228,6 +228,12 @@ class FactExtractionService:
                      "usage": response.usage, "attempts": response.attempts,
                      "reused": reused, "candidate_count": len(candidates),
                      "status": "FAILED" if response.error else "SUCCEEDED", "error_code": response.error}
+            audit["page_status"] = response.page_status
+            audit["source_type"] = source["source_type"]
+            audit["returned_fact_count"] = max(response.returned_fact_count, len(candidates))
+            audit["fact_rejections"] = list(response.fact_rejections)
+            audit["duplicates"] = list(response.duplicates)
+            duplicate_count += len(response.duplicates)
             audit["http_audit"] = list(response.http_audit)
             audit["contract_adaptations"] = [
                 {**item, "source_id": source["id"]} for item in response.contract_adaptations
@@ -239,9 +245,13 @@ class FactExtractionService:
             provider_calls.append(audit)
             if response.error:
                 errors.append(f"Source {source['id']}: {response.error}")
-                candidates = ()
             confirmed_for_page = 0
-            rejected_for_page = 0
+            rejected_for_page = len(response.fact_rejections)
+            for item in response.fact_rejections:
+                rejected.append(RejectedFact(None,
+                    EvidenceCheckStatus.INVALID_SCHEMA if item["error_code"] == "INVALID_SCHEMA"
+                    else EvidenceCheckStatus.INSUFFICIENT_EVIDENCE,
+                    f"fact[{item['fact_index']}]: {item['error_code']}", source["url"], snapshot["id"]))
             seen_keys: set[str] = set()
             with self._persistence.transaction() as session:
                 existing = self._persistence.product_facts.list_for_snapshot(
@@ -280,6 +290,10 @@ class FactExtractionService:
                     existing_keys=existing_keys | seen_keys,
                 )
                 if check.status != EvidenceCheckStatus.CONFIRMED:
+                    if policy_key and check.status == EvidenceCheckStatus.DUPLICATE:
+                        duplicate_count += 1
+                        audit["duplicates"].append({"reason": "EXISTING_SNAPSHOT_KEY", "action": "SKIPPED"})
+                        continue
                     rejected_for_page += 1
                     if check.status == EvidenceCheckStatus.DUPLICATE:
                         duplicate_count += 1
@@ -430,9 +444,11 @@ class FactExtractionService:
                 )
             audit["confirmed_count"] = confirmed_for_page
             audit["rejected_count"] = rejected_for_page
+            if rejected_for_page:
+                audit["page_status"] = "PARTIAL_ERROR" if confirmed_for_page else "FAILED"
             if cache_key and confirmed_for_page and not response.error and not rejected_for_page:
                 audit["cache_key"] = cache_key
-            if policy_key and rejected_for_page:
+            if policy_key and rejected_for_page and not response.error:
                 errors.append(f"Source {source['id']}: EVIDENCE_REJECTED")
             if tool_call_id is not None:
                 self._finish_tool(

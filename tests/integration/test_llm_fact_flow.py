@@ -1,5 +1,6 @@
 """Real adapter + mocked HTTPS transport + disposable MySQL; never paid requests."""
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from unittest.mock import Mock
 from types import SimpleNamespace
@@ -38,10 +39,11 @@ class Discovery:
 
 
 class Transport:
-    def __init__(self, bad=False, null_fields=False):
+    def __init__(self, bad=False, null_fields=False, mode=None):
         self.count = 0
         self.bad = bad
         self.null_fields = null_fields
+        self.mode = mode
 
     def post(self, url, **kwargs):
         self.count += 1
@@ -54,6 +56,12 @@ class Transport:
             "evidence_text":"invented" if self.bad else TEXT,"confidence":0.9}]}
         if self.null_fields:
             payload["facts"][0]["fact_value"].update(status=None, feature_category=None)
+        if self.mode == "partial":
+            payload["facts"].append({**deepcopy(payload["facts"][0]), "evidence_text":"invented"})
+        elif self.mode == "duplicate":
+            payload["facts"].append(deepcopy(payload["facts"][0]))
+        elif self.mode == "empty":
+            payload["facts"] = []
         data = {"choices":[{"finish_reason":"stop","message":{"content":json.dumps(payload)}}],
                 "usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}
         response = Mock(status_code=200)
@@ -212,3 +220,46 @@ def test_null_feature_fields_persist_as_audited_legacy_sentinels(persistence):
     adaptations = output["provider_calls"][0]["contract_adaptations"]
     assert len(adaptations) == 2
     assert all(a["model_value"] is None and a["source_id"] > 0 for a in adaptations)
+
+
+def test_partial_page_saves_only_valid_facts_without_comparison_or_cache(persistence):
+    seed(persistence)
+    result = runner(persistence, Transport(mode="partial")).run("Acme")
+    assert result.final_state == AgentState.FAILED
+    with persistence.transaction() as session:
+        facts = persistence.product_facts.list_for_run(session, result.run_id)
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+        assert not persistence.changes.list_for_run(session, result.run_id)
+        assert not persistence.fact_versions.list_current(session, facts[0]["competitor_id"])
+    assert len(facts) == 1 and facts[0]["evidence_text"] == TEXT
+    assert facts[0]["evidence_status"] == "CONFIRMED"
+    output = next(json.loads(c["output_summary"]) for c in calls if c["tool_name"] == "extract_competitor_facts")
+    audit = output["provider_calls"][0]
+    assert audit["page_status"] == "PARTIAL_ERROR"
+    assert audit["rejected_count"] == 1 and audit["confirmed_count"] == 1
+    assert "cache_key" not in audit
+    assert not any(c["tool_name"] == "generate_competitor_report" for c in calls)
+
+
+def test_duplicate_page_does_not_fail_run(persistence):
+    seed(persistence)
+    result = runner(persistence, Transport(mode="duplicate")).run("Acme")
+    assert result.final_state in {AgentState.COMPLETED, AgentState.COMPLETED_WITH_WARNINGS}
+    assert result.summary.confirmed_fact_count == 1
+    with persistence.transaction() as session:
+        assert len(persistence.product_facts.list_for_run(session, result.run_id)) == 1
+
+
+def test_empty_page_can_complete_and_cannot_remove_prior_fact(persistence):
+    seed(persistence)
+    first = runner(persistence, Transport()).run("Acme")
+    second = runner(persistence, Transport(mode="empty"), model="new-policy").run("Acme")
+    assert second.final_state in {AgentState.COMPLETED, AgentState.COMPLETED_WITH_WARNINGS}
+    with persistence.transaction() as session:
+        calls = persistence.tool_calls.list_for_run(session, second.run_id)
+        changes = persistence.changes.list_for_run(session, second.run_id)
+        old = persistence.product_facts.list_for_run(session, first.run_id)
+        assert persistence.fact_versions.list_current(session, old[0]["competitor_id"])
+    output = next(json.loads(c["output_summary"]) for c in calls if c["tool_name"] == "extract_competitor_facts")
+    assert output["provider_calls"][0]["page_status"] == "NO_FACTS"
+    assert not any(c["change_type"] == "REMOVED" for c in changes)

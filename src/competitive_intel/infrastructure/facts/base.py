@@ -33,6 +33,10 @@ class FactExtractionResponse:
     http_audit: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     evidence_diagnostics: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     contract_adaptations: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    page_status: str = "SUCCEEDED"
+    returned_fact_count: int = 0
+    fact_rejections: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    duplicates: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
 class FactExtractionProvider(Protocol):

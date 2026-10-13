@@ -13,6 +13,7 @@ import requests
 from competitive_intel.config import LLMSettings
 from competitive_intel.domain.evidence import EvidenceChecker, normalized_evidence
 from competitive_intel.domain.fact_schema import REQUIRED
+from competitive_intel.domain.fact_comparison import FactNormalizer
 from competitive_intel.domain.facts import (
     BillingCommitment, BillingPeriod, BillingUnit, CandidateFact, EvidenceCheckStatus,
     FactCategory, FeatureCategory, FeatureStatus, PlanPublicStatus, PricePublicStatus,
@@ -20,7 +21,48 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-json-mode-v4-conservative-null-contract"
+POLICY_VERSION = "quoted-facts-v5-page-aware-fact-validation"
+PAGE_CATEGORIES = {
+    "HOMEPAGE": (FactCategory.POSITIONING, FactCategory.FEATURE),
+    "FEATURES": (FactCategory.FEATURE,),
+    "PRICING": (FactCategory.PLAN, FactCategory.PRICE),
+    "CHANGELOG": (FactCategory.PRODUCT_UPDATE,),
+}
+PAGE_INSTRUCTIONS = {
+    "HOMEPAGE": """HOMEPAGE contract: extract only explicit product positioning or named
+features with a substantive quoted description. Do not turn navigation links into
+facts. Never infer plans, prices, availability or status from website presence.""",
+    "FEATURES": """FEATURES contract: prioritize feature_name and feature_description.
+Quote a contiguous block that includes both. Category may use only explicit label
+or defined aliases. Missing status, availability and related_plan must be null.
+Do not duplicate a feature under spelling variants or create positioning facts.""",
+    "PRICING": """PRICING contract: use PLAN for an explicitly named plan and its quoted
+description/features; use PRICE for one explicitly stated price of a named plan.
+Each fact needs ONE contiguous quote containing every non-null value, including
+plan name. Do not combine unrelated blocks, table columns or billing toggles.
+A bare $ is NOT USD: currency must be null unless explicitly identified.
+Do not infer month/year from page structure, multiply/divide prices, or infer
+billing commitment from monthly equivalent prices. Use null for unsupported enum
+dimensions. Do not infer FREE or zero from absent prices. Copy explicitly listed
+plan features only from that plan's same quoted block. Skip prices whose plan
+cannot be linked within one quote. Amount must be a quoted numeric string.""",
+    "CHANGELOG": """CHANGELOG contract: output PRODUCT_UPDATE only. Copy update_title
+and summary verbatim from one contiguous release block. Keep different releases
+separate. published_date must be null unless an explicit ISO date occurs in that
+same quote; do not invent a year or reformat dates. Return null for unsupported
+status/update_type/availability; do not fill AVAILABLE, plans or feature_category.
+affected_features may contain only explicitly named features in this same quote.
+Choose a quote long enough to support both title and description, not a status-only
+sentence. Never use a neighboring release as evidence.""",
+}
+NULL_SENTINELS = {
+    ("FEATURE", "feature_category"): "OTHER", ("FEATURE", "status"): "UNKNOWN",
+    ("PLAN", "public_status"): "UNKNOWN",
+    ("PRICE", "billing_period"): "UNKNOWN", ("PRICE", "billing_unit"): "UNKNOWN",
+    ("PRICE", "billing_commitment"): "UNKNOWN", ("PRICE", "public_status"): "UNKNOWN",
+    ("PRICE", "tax_status"): "UNKNOWN",
+    ("PRODUCT_UPDATE", "status"): "UNKNOWN", ("PRODUCT_UPDATE", "update_type"): "UNKNOWN",
+}
 # Classification-only aliases. Never apply to descriptions, prices or evidence.
 FEATURE_CATEGORY_ALIASES = {
     "DOCUMENTS": ("docs", "doc", "document", "documents"),
@@ -77,17 +119,19 @@ def _object(properties: dict) -> dict:
 def output_schema(request: FactExtractionRequest) -> dict:
     variants = []
     for category in request.allowed_fact_categories:
+        if category not in PAGE_CATEGORIES.get(request.source_type, ()):
+            continue
         fields = {}
         for key in REQUIRED[category]:
             enum = ENUM_FIELDS.get((category.value, key))
             if enum:
-                nullable = category == FactCategory.FEATURE and key in {"status", "feature_category"}
+                nullable = (category.value, key) in NULL_SENTINELS
                 fields[key] = {"type": ["string", "null"] if nullable else "string",
                                "enum": [item.value for item in enum] + ([None] if nullable else [])}
             elif key in LIST_FIELDS:
                 fields[key] = {"type": "array", "items": {"type": "string"}}
             else:
-                fields[key] = {"type": ["string", "null"] if key in OPTIONAL_FIELDS else "string"}
+                fields[key] = {"type": ["string", "null"] if key in OPTIONAL_FIELDS or (category.value, key) in NULL_SENTINELS else "string"}
         variants.append(_object({
             "fact_category": {"type": "string", "enum": [category.value]},
             "fact_value": _object(fields),
@@ -121,7 +165,7 @@ def _validate(value, schema: dict) -> None:
             raise ValueError("INVALID_SCHEMA")
         for key, item in value.items():
             _validate(item, schema["properties"][key])
-    if isinstance(value, list):
+    if isinstance(value, list) and "items" in schema:
         for item in value:
             _validate(item, schema["items"])
     if "minimum" in schema and not schema["minimum"] <= value <= schema["maximum"]:
@@ -225,11 +269,16 @@ class LLMFactExtractionProvider:
         http_audit: list[dict] = []
         evidence_diagnostics: list[dict] = []
         contract_adaptations: list[dict] = []
+        fact_rejections: list[dict] = []
+        duplicates: list[dict] = []
+        returned_fact_count = 0
 
         def result(facts=(), error=None, warnings=()):
             return FactExtractionResponse(tuple(facts), self.name, cfg.model or "unconfigured",
                                           "", usage, tuple(warnings), error, attempts, tuple(http_audit),
-                                          tuple(evidence_diagnostics), tuple(contract_adaptations))
+                                          tuple(evidence_diagnostics), tuple(contract_adaptations),
+                                          ("PARTIAL_ERROR" if facts else "FAILED") if error else ("SUCCEEDED" if facts else "NO_FACTS"),
+                                          returned_fact_count, tuple(fact_rejections), tuple(duplicates))
 
         endpoint = urlsplit(cfg.endpoint or "")
         if (not cfg.api_key or not cfg.model or endpoint.scheme != "https"
@@ -248,12 +297,14 @@ class LLMFactExtractionProvider:
         if not request.allowed_fact_categories:
             return result(error="NO_ALLOWED_CATEGORIES")
         schema = output_schema(request)
+        if not schema["properties"]["facts"]["items"]["anyOf"]:
+            return result(error="NO_PAGE_CONTRACT")
         request_url = cfg.endpoint.rstrip("/")
         if not request_url.endswith("/chat/completions"):
             request_url += "/chat/completions"
         target = urlsplit(request_url)
         payload = {"model": cfg.model, "messages": [
-            {"role": "system", "content": SYSTEM + "\nReturn JSON conforming exactly to this JSON Schema:\n" + json.dumps(schema)},
+            {"role": "system", "content": SYSTEM + "\n" + PAGE_INSTRUCTIONS[request.source_type] + "\nReturn JSON conforming exactly to this JSON Schema:\n" + json.dumps(schema)},
             {"role": "user", "content": json.dumps({"competitor_name": request.competitor_name,
              "source_type": request.source_type, "snapshot_id": request.snapshot_id,
              "max_facts": request.max_facts, "clean_content": content}, ensure_ascii=False)}],
@@ -311,7 +362,9 @@ class LLMFactExtractionProvider:
                 if choice["message"].get("refusal"):
                     return result(error="LLM_REFUSAL")
                 parsed = json.loads(choice["message"]["content"])
-                _validate(parsed, schema)
+                # Validate the envelope first; each fact is validated independently.
+                envelope = _object({"snapshot_id": {"type": "integer"}, "facts": {"type": "array"}})
+                _validate(parsed, envelope)
                 if parsed["snapshot_id"] != request.snapshot_id:
                     evidence_diagnostics.append({"fact_index": None, "field_name": "snapshot_id",
                         "field_value": str(parsed["snapshot_id"])[:160], "evidence_snippet": "",
@@ -320,14 +373,21 @@ class LLMFactExtractionProvider:
                     return result(error="WRONG_SNAPSHOT_REFERENCE")
                 if len(parsed["facts"]) > request.max_facts:
                     return result(error="TOO_MANY_FACTS")
+                returned_fact_count = len(parsed["facts"])
                 candidates = []
-                identities = set()
+                identities = {}
                 grounding_errors = []
                 for fact_index, item in enumerate(parsed["facts"]):
+                    try:
+                        _validate(item, schema["properties"]["facts"]["items"])
+                    except ValueError:
+                        grounding_errors.append("INVALID_SCHEMA")
+                        fact_rejections.append({"fact_index": fact_index, "error_code": "INVALID_SCHEMA"})
+                        continue
                     # Legacy domain enums cannot store null. These sentinels assert
                     # no classification/status; never replace a non-null model value.
-                    if item["fact_category"] == "FEATURE":
-                        for field, sentinel in (("feature_category", "OTHER"), ("status", "UNKNOWN")):
+                    for (category, field), sentinel in NULL_SENTINELS.items():
+                        if item["fact_category"] == category:
                             if item["fact_value"][field] is None:
                                 item["fact_value"][field] = sentinel
                                 contract_adaptations.append({"fact_index": fact_index,
@@ -342,16 +402,24 @@ class LLMFactExtractionProvider:
                                 snapshot_id=request.snapshot_id)
                     except ValueError as exc:
                         grounding_errors.append(str(exc))
+                        fact_rejections.append({"fact_index": fact_index, "error_code": str(exc)})
                         continue
                     identity = EvidenceChecker().check(candidate, content, request.source_url).fact_key
+                    canonical = FactNormalizer().canonical_json(candidate.fact_category.value, candidate.fact_value)
                     if identity in identities:
-                        raise ValueError("DUPLICATE_FACT_IDENTITY")
-                    identities.add(identity)
+                        previous_index, previous_value = identities[identity]
+                        if previous_value == canonical:
+                            duplicates.append({"fact_index": fact_index, "kept_fact_index": previous_index,
+                                "reason": "IDENTICAL_CANONICAL_FACT", "action": "SKIPPED"})
+                        else:
+                            grounding_errors.append("CONFLICTING_FACT_IDENTITY")
+                            fact_rejections.append({"fact_index": fact_index, "error_code": "CONFLICTING_FACT_IDENTITY"})
+                        continue
+                    identities[identity] = (fact_index, canonical)
                     candidates.append(candidate)
                 if grounding_errors:
-                    return result(error=grounding_errors[0])
-                return result(candidates, error=None if candidates else "NO_VERIFIABLE_FACTS",
-                              warnings=() if candidates else ("NO_VERIFIABLE_FACTS",))
+                    return result(candidates, error=grounding_errors[0])
+                return result(candidates, warnings=() if candidates else ("NO_FACTS: no facts returned; not proof of absence.",))
             except requests.Timeout:
                 # A timeout may already have incurred cost. Never retry it automatically.
                 return result(error="LLM_TIMEOUT")
