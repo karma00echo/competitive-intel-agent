@@ -22,7 +22,7 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-v8-server-plan-name-billing-quotes"
+POLICY_VERSION = "quoted-facts-v9-literal-price-subject-full-alternative-span"
 PAGE_CATEGORIES = {
     "HOMEPAGE": (FactCategory.POSITIONING, FactCategory.FEATURE),
     "FEATURES": (FactCategory.FEATURE,),
@@ -77,7 +77,20 @@ Separate price alternatives into individual facts without mixing their dimension
 For both, unit is null (no DOMAIN enum), currency null for bare $. Paid annually
 describes payment commitment, NOT a YEAR price period. Use only the dimension
 attached to that amount, not a neighboring alternative. Explicit mappings:
-paid annually -> ANNUAL_BILLING; paid monthly -> MONTHLY_BILLING.""",
+paid annually -> ANNUAL_BILLING; paid monthly -> MONTHLY_BILLING.
+PRICE subject selection: plan_name must be a literal, contiguous noun phrase
+identifying the priced plan or add-on in its evidence. Never construct a display
+label by moving words, adding a product prefix, or combining a location and an
+item. For 'Connect a custom domain to your Site', the priced subject is exactly
+'custom domain', NOT 'Site custom domain'. Do not capitalize or rewrite the phrase.
+When a later price alternative omits the subject (for example starts with 'or'),
+quote the FULL continuous sentence from the shared subject through that alternative,
+including the earlier price and ALL intervening words. It is valid for two price
+facts to share that full quote; each fact must use only its own amount and payment
+commitment. A quote starting at 'or $10...' lacks the subject and is invalid.
+Before returning a PRICE, verify plan_name literally occurs inside evidence_text
+and evidence_text occurs continuously in source text. If either fails, omit it;
+do not repair quotes or fabricate a subject.""",
     "CHANGELOG": """CHANGELOG contract: output PRODUCT_UPDATE only. Copy update_title
 and summary verbatim from one contiguous release block. Keep different releases
 separate. published_date must be null unless an explicit ISO date occurs in that

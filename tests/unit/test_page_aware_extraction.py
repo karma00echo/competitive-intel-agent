@@ -258,3 +258,34 @@ def test_price_period_and_payment_are_independent(payment, commitment):
     item["evidence_text"] = "Pro $10/month/domain"
     assert extract([item],kind="PRICING",content=item["evidence_text"],
                    allowed=(FactCategory.PRICE,)).error == "UNGROUNDED_FIELD"
+
+
+DOMAIN_QUOTE = ("Connect a custom domain to your Site and remove branding for "
+                "$8/month/domain paid annually, or $10/month per domain paid monthly.")
+
+
+@pytest.mark.parametrize("subject,quote,error", [
+    ("custom domain", DOMAIN_QUOTE, None),
+    ("Site custom domain", DOMAIN_QUOTE, "UNGROUNDED_FIELD"),
+    ("custom domain", "or $10/month per domain paid monthly.", "UNGROUNDED_FIELD"),
+    ("custom domain", "custom domain $10/month per domain paid monthly.", "EVIDENCE_NOT_FOUND"),
+])
+def test_price_alternative_requires_literal_subject_and_unbroken_span(subject, quote, error):
+    item = price(period="MONTH")
+    item["fact_value"].update(plan_name=subject, billing_commitment="MONTHLY_BILLING")
+    item["evidence_text"] = quote
+    result = extract([item], kind="PRICING", content=DOMAIN_QUOTE, allowed=(FactCategory.PRICE,))
+    assert result.error == error
+    assert len(result.candidate_facts) == (0 if error else 1)
+
+
+def test_price_alternatives_can_share_full_evidence_without_conflict():
+    items = []
+    for amount, commitment in [("8", "ANNUAL_BILLING"), ("10", "MONTHLY_BILLING")]:
+        item = price(period="MONTH")
+        item["fact_value"].update(plan_name="custom domain", amount=amount, billing_commitment=commitment)
+        item["evidence_text"] = DOMAIN_QUOTE
+        items.append(item)
+    result = extract(items, kind="PRICING", content=DOMAIN_QUOTE, allowed=(FactCategory.PRICE,))
+    assert not result.error and len(result.candidate_facts) == 2
+    assert not result.duplicates and not result.fact_rejections
