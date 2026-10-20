@@ -62,6 +62,7 @@ class FactExtractionService:
         duplicate_count = 0
         historical_reuse_count = 0
         run_seen_keys: set[tuple[str, str]] = set()
+        run_values: dict[tuple[str, str], str] = {}
         normalized_name = competitor_name.strip().casefold()
 
         with self._persistence.transaction() as session:
@@ -136,11 +137,15 @@ class FactExtractionService:
                 warnings.append(
                     f"Source {source['id']} has no successful clean snapshot; skipped."
                 )
+                if policy_key:
+                    errors.append(f"Source {source['id']}: MISSING_SUCCESSFUL_SNAPSHOT")
                 continue
             snapshot_ids.append(snapshot["id"])
             allowed = ALLOWED_BY_SOURCE.get(source["source_type"], ())
             if not allowed:
                 warnings.append(f"Source type {source['source_type']} has no fact schema.")
+                if policy_key:
+                    errors.append(f"Source {source['id']}: NO_PAGE_CONTRACT")
                 continue
             if model_calls >= self._limits.max_model_calls:
                 warnings.append("Model call limit reached.")
@@ -176,21 +181,25 @@ class FactExtractionService:
                         },
                     )
             started = perf_counter()
-            cache_key = sha256(f"{source['id']}:{policy_key}:{content}".encode()).hexdigest() if policy_key else None
+            cache_key = sha256(json.dumps([
+                "complete-page-v2", source["id"], source["source_type"], policy_key,
+                self._limits.max_facts_per_page, content,
+            ], ensure_ascii=False).encode()).hexdigest() if policy_key else None
             reused = False
             try:
                 response = None
                 if cache_key:
                     with self._persistence.transaction() as session:
-                        cached_run = self._persistence.fact_observations.find_reusable_run(session, cache_key)
-                        observations = self._persistence.fact_observations.list_for_run(session, cached_run) if cached_run else []
-                    rows = [row for row in observations if row["source_id"] == source["id"]]
-                    if rows:
+                        cached = self._persistence.fact_observations.get_cached_page(session, cache_key)
+                        origin = self._persistence.snapshots.get(session, cached["snapshot_id"]) if cached else None
+                    if (cached and origin and origin["source_id"] == source["id"]
+                            and origin["fetch_status"] == "SUCCESS" and origin["clean_content"] == content
+                            and cached.get("source_url") == source["url"]):
                         response = FactExtractionResponse(tuple(CandidateFact(
                             FactCategory(row["fact_category"]),
-                            json.loads(row["fact_value"]) if isinstance(row["fact_value"], str) else row["fact_value"],
-                            row["value_text"], row["observed_evidence"], float(row["observed_confidence"]),
-                        ) for row in rows), self._provider.name, self._provider.settings.model or "", "", {})
+                            row["fact_value"], row["evidence_text"], row["evidence_text"], float(row["confidence"]),
+                        ) for row in cached["validated_facts"]), self._provider.name,
+                            self._provider.settings.model or "", "", {}, page_status=cached["page_status"])
                         reused = True
                 if response is None:
                     response = self._provider.extract(FactExtractionRequest(
@@ -249,6 +258,7 @@ class FactExtractionService:
             if response.error:
                 errors.append(f"Source {source['id']}: {response.error}")
             confirmed_for_page = 0
+            validated_facts: list[dict] = []
             rejected_for_page = len(response.fact_rejections)
             for item in response.fact_rejections:
                 rejected.append(RejectedFact(None,
@@ -290,7 +300,7 @@ class FactExtractionService:
                     continue
                 check = self._checker.check(
                     candidate, content, source["url"],
-                    existing_keys=existing_keys | seen_keys,
+                    existing_keys=seen_keys if policy_key else existing_keys | seen_keys,
                 )
                 if check.status != EvidenceCheckStatus.CONFIRMED:
                     if policy_key and check.status == EvidenceCheckStatus.DUPLICATE:
@@ -316,11 +326,22 @@ class FactExtractionService:
                     normalize_fact(candidate),
                     evidence_status=EvidenceCheckStatus.CONFIRMED,
                 )
+                if policy_key:
+                    validated_facts.append({"fact_category": normalized.fact_category.value,
+                        "fact_value": normalized.fact_value, "evidence_text": normalized.evidence_text,
+                        "confidence": normalized.confidence})
                 identity = (
                     normalized.fact_category.value,
                     normalized.fact_key or "",
                 )
                 if identity in run_seen_keys:
+                    if policy_key and run_values[identity] != self._history_normalizer.canonical_json(
+                            normalized.fact_category.value, normalized.fact_value):
+                        rejected_for_page += 1
+                        errors.append(f"Source {source['id']}: CONFLICTING_FACT_IDENTITY")
+                        rejected.append(RejectedFact(normalized, EvidenceCheckStatus.CONFLICTING,
+                            "Cross-source canonical values conflict.", source["url"], snapshot["id"]))
+                        continue
                     duplicate_count += 1
                     rejected.append(
                         RejectedFact(
@@ -344,7 +365,7 @@ class FactExtractionService:
                     existing_fact = self._persistence.product_facts.find_by_snapshot_key(
                         session, snapshot["id"], normalized.fact_key or ""
                     )
-                    if existing_fact:
+                    if existing_fact and not policy_key:
                         duplicate_count += 1
                         rejected.append(
                             RejectedFact(
@@ -368,7 +389,18 @@ class FactExtractionService:
                             normalized.fact_key or "",
                         )
                     )
-                    if (
+                    if existing_fact and policy_key:
+                        if (existing_fact["evidence_status"] != "CONFIRMED" or
+                                self._history_normalizer.canonical_json(normalized.fact_category.value,
+                                    existing_fact["fact_value"]) != canonical):
+                            errors.append(f"Source {source['id']}: EXISTING_SNAPSHOT_VALUE_CONFLICT")
+                            rejected_for_page += 1
+                            continue
+                        fact_id = int(existing_fact["id"])
+                        historical_reuse_count += 1
+                        duplicate_count += 1
+                        audit["duplicates"].append({"reason": "EXISTING_SNAPSHOT_KEY", "action": "OBSERVED"})
+                    elif (
                         current_fact
                         and (not policy_key or reused)
                         and (
@@ -428,6 +460,7 @@ class FactExtractionService:
                         duplicate_count += 1
                         continue
                 run_seen_keys.add(identity)
+                run_values[identity] = canonical
                 seen_keys.add(normalized.fact_key or "")
                 existing_keys.add(normalized.fact_key or "")
                 confirmed_for_page += 1
@@ -449,8 +482,11 @@ class FactExtractionService:
             audit["rejected_count"] = rejected_for_page
             if rejected_for_page:
                 audit["page_status"] = "PARTIAL_ERROR" if confirmed_for_page else "FAILED"
-            if cache_key and confirmed_for_page and not response.error and not rejected_for_page:
+            if cache_key and not response.error and not rejected_for_page:
                 audit["cache_key"] = cache_key
+                audit["cache_version"] = 2
+                audit["source_url"] = source["url"]
+                audit["validated_facts"] = validated_facts
             if policy_key and rejected_for_page and not response.error:
                 errors.append(f"Source {source['id']}: EVIDENCE_REJECTED")
             if tool_call_id is not None:

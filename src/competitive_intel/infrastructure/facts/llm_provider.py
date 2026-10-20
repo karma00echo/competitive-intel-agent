@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+import ssl
+import http.client
 from hashlib import sha256
 from time import perf_counter, sleep
 from urllib.parse import urlsplit
 
 import requests
+from urllib3 import exceptions as http_errors
 
 from competitive_intel.config import LLMSettings
 from competitive_intel.domain.evidence import EvidenceChecker, normalized_evidence
@@ -391,8 +395,11 @@ class LLMFactExtractionProvider:
             audit = {"http_status": None, "endpoint_host": target.hostname,
                      "endpoint_path": target.path, "model": cfg.model,
                      "provider_error_type": None, "provider_error_code": None,
-                     "safe_message": None, "duration_ms": 0}
+                     "safe_message": None, "duration_ms": 0,
+                     "failure_stage": None, "exception_type": None,
+                     "connection_failure": None}
             http_audit.append(audit)
+            phase = "CONNECT_OR_RESPONSE_HEADERS"
             try:
                 with self._session.post(request_url, json=payload,
                         headers={"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"},
@@ -400,6 +407,7 @@ class LLMFactExtractionProvider:
                         allow_redirects=False, stream=True) as response:
                     status = response.status_code
                     audit["http_status"] = status
+                    phase = "READ_RESPONSE_BODY"
                     if status != 200:
                         audit.update(_safe_http_error(response, cfg.api_key))
                         audit["duration_ms"] = max(0, int((perf_counter() - started) * 1000))
@@ -415,6 +423,7 @@ class LLMFactExtractionProvider:
                         body.extend(chunk)
                         if len(body) > 1_000_000:
                             return result(error="LLM_RESPONSE_TOO_LARGE")
+                phase = "DECODE_RESPONSE"
                 data = json.loads(body)
                 if not isinstance(data, dict):
                     return result(error="LLM_INVALID_RESPONSE")
@@ -524,10 +533,12 @@ class LLMFactExtractionProvider:
                 if grounding_errors:
                     return result(candidates, error=grounding_errors[0])
                 return result(candidates, warnings=() if candidates else ("NO_FACTS: no facts returned; not proof of absence.",))
-            except requests.Timeout:
+            except requests.Timeout as exc:
                 # A timeout may already have incurred cost. Never retry it automatically.
+                audit.update(_connection_diagnostic(exc, phase))
                 return result(error="LLM_TIMEOUT")
-            except requests.RequestException:
+            except requests.RequestException as exc:
+                audit.update(_connection_diagnostic(exc, phase))
                 return result(error="LLM_CONNECTION_ERROR")
             except (ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
                 known = {"INVALID_SCHEMA", "EVIDENCE_NOT_FOUND", "UNGROUNDED_FIELD",
@@ -536,6 +547,39 @@ class LLMFactExtractionProvider:
             finally:
                 audit["duration_ms"] = max(0, int((perf_counter() - started) * 1000))
         return result(error="LLM_REQUEST_FAILED")
+
+
+def _connection_diagnostic(exc: BaseException, phase: str) -> dict:
+    """Classify typed causes only; never inspect or persist exception messages."""
+    chain, pending, seen = [], [exc], set()
+    while pending and len(chain) < 12:
+        item = pending.pop()
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        chain.append(item)
+        pending.extend(x for x in (item.__cause__, item.__context__,
+                                   getattr(item, "reason", None), *item.args)
+                       if isinstance(x, BaseException))
+    kinds = (
+        ("DNS_RESOLUTION_FAILED", (socket.gaierror, http_errors.NameResolutionError)),
+        ("TLS_SSL_ERROR", (ssl.SSLError, requests.exceptions.SSLError, http_errors.SSLError)),
+        ("CONNECT_TIMEOUT", (requests.ConnectTimeout, http_errors.ConnectTimeoutError)),
+        ("READ_TIMEOUT", (requests.ReadTimeout, http_errors.ReadTimeoutError)),
+        ("TCP_CONNECTION_FAILED", (ConnectionRefusedError, http_errors.NewConnectionError)),
+        ("REMOTE_DISCONNECTED", (ConnectionResetError, BrokenPipeError, http.client.RemoteDisconnected)),
+        ("PROTOCOL_ERROR", (requests.exceptions.ChunkedEncodingError, http_errors.ProtocolError)),
+        ("TIMEOUT_UNSPECIFIED", (requests.Timeout, TimeoutError)),
+    )
+    # NewConnectionError inherits ConnectTimeoutError, but is not a timeout.
+    if any(isinstance(x, (ConnectionRefusedError, http_errors.NewConnectionError))
+           and not isinstance(x, http_errors.NameResolutionError) for x in chain):
+        kinds = (kinds[0], kinds[1], kinds[4], *kinds[2:4], *kinds[5:])
+    failure = next((label for label, types in kinds if any(isinstance(x, types) for x in chain)),
+                   "HTTP_CLIENT_ERROR")
+    return {"failure_stage": phase, "exception_type": type(exc).__name__,
+            "exception_chain": [type(x).__name__ for x in chain],
+            "connection_failure": failure}
 
 
 def _safe_http_error(response, api_key: str) -> dict:

@@ -331,7 +331,7 @@ class AgentRunRepository:
     def get_previous_successful_with_facts(
         self, session: Session, competitor_id: int, before_run_id: int
     ) -> Record | None:
-        """Warnings are persisted as COMPLETED and are valid comparison baselines."""
+        """Fail closed for legacy/smoke/incomplete runs; never treat PENDING as active."""
         return _one(
             session,
             """
@@ -339,8 +339,29 @@ class AgentRunRepository:
             WHERE ar.competitor_id = :competitor_id
               AND ar.id < :before_run_id
               AND ar.status = 'COMPLETED'
+              AND ar.run_mode IN ('BASELINE', 'TRACKING')
+              AND EXISTS (
+                  SELECT 1 FROM tool_calls tc WHERE tc.run_id = ar.id
+                    AND tc.tool_name = 'finalize_run_summary' AND tc.status = 'SUCCEEDED'
+                    AND JSON_CONTAINS(tc.output_summary,
+                        JSON_OBJECT('version', 1, 'run_kind', 'FULL_AGENT_RUNNER', 'eligible', TRUE),
+                        '$.baseline_integrity')
+              )
               AND EXISTS (
                   SELECT 1 FROM fact_observations fo WHERE fo.run_id = ar.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM fact_observations fo
+                  LEFT JOIN product_facts pf ON pf.id = fo.fact_id
+                  LEFT JOIN snapshots sn ON sn.id = fo.snapshot_id
+                  LEFT JOIN sources src ON src.id = fo.source_id
+                  WHERE fo.run_id = ar.id AND (
+                    fo.comparison_status NOT IN ('BASELINE', 'ADDED', 'MODIFIED', 'UNCHANGED')
+                    OR pf.id IS NULL OR pf.evidence_status != 'CONFIRMED'
+                    OR sn.id IS NULL OR sn.source_id != fo.source_id
+                    OR sn.fetch_status != 'SUCCESS' OR sn.run_id != ar.id
+                    OR src.id IS NULL OR src.competitor_id != ar.competitor_id
+                  )
               )
             ORDER BY ar.id DESC
             LIMIT 1
@@ -910,6 +931,27 @@ class FactVersionRepository:
 
 
 class FactObservationRepository:
+    def get_cached_page(self, session: Session, cache_key: str) -> Record | None:
+        """Versioned complete page result, not merely newly inserted observations."""
+        rows = _all(session, """
+            SELECT tc.output_summary FROM tool_calls tc
+            JOIN agent_runs ar ON ar.id = tc.run_id
+            WHERE ar.status = 'COMPLETED' AND tc.status = 'SUCCEEDED'
+              AND tc.tool_name IN ('extract_competitor_facts', 'extract_facts')
+              AND JSON_CONTAINS(tc.output_summary,
+                  JSON_OBJECT('cache_key', :cache_key), '$.provider_calls')
+            ORDER BY tc.id DESC
+        """, {"cache_key": cache_key})
+        for row in rows:
+            payload = json.loads(row["output_summary"])
+            for page in payload.get("provider_calls", []):
+                if (page.get("cache_key") == cache_key and page.get("cache_version") == 2
+                        and page.get("page_status") in {"SUCCEEDED", "NO_FACTS"}
+                        and not page.get("error_code") and not page.get("rejected_count")
+                        and isinstance(page.get("validated_facts"), list)):
+                    return page
+        return None
+
     def find_reusable_run(self, session: Session, cache_key: str) -> int | None:
         """Only a completed, audited LLM extraction may supply unchanged-page facts."""
         row = _one(session, """

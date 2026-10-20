@@ -2,6 +2,43 @@
 
 ## Stage 9.1: real LLM fact extraction
 
+### Stage 9.1.2: reliability and baseline integrity
+
+Connection failures audit typed causes and the request phase (connect/headers,
+response-body read, or decode), not exception messages. DNS, TCP refusal, SSL,
+connect/read timeout, remote disconnect and protocol errors are distinguished
+only when their actual exception types support that conclusion. Generic client
+errors remain unspecified. No connection/timeout retries are introduced; the
+existing bounded HTTP 429/5xx retry policy is unchanged. One requests Session is
+reused, and responses are closed by their context manager. Old audits cannot
+retroactively establish the precise cause of run #34.
+
+Version-2 page caches store the entire validated fact set in the existing tool
+audit JSON, independently of new-row counts. Snapshot duplicates are checked for
+canonical equality and receive observations; conflicting values fail closed.
+Cross-source duplicates retain separate complete page caches. Empty success can
+be cached, but is not proof of absence. Cache replay checks the source URL,
+snapshot/source relation and exact cleaned content, then runs evidence checks
+again before saving observations. PARTIAL_ERROR and failed runs cannot supply
+complete caches. Old observation-only caches are deliberately not reused.
+
+Only a completed full AgentRunner run with a versioned `baseline_integrity`
+marker, complete successful source coverage, a report and finalized observations
+can be selected as a formal comparison baseline. Repository selection rechecks
+CONFIRMED facts, non-PENDING observations and successful run-owned snapshots.
+Legacy and standalone smoke runs without this provenance are excluded, not
+deleted. With only smoke history, the next formal run starts a new baseline.
+
+State policy: SUCCEEDED pages may contribute validated observations. NO_FACTS is
+a legal non-error, but prevents full baseline replacement/eligibility; absence
+is unknown. PARTIAL_ERROR retains only validated facts with PENDING observations
+and stops real runs before comparison/reporting. Transport/schema/evidence
+errors, missing successful snapshots or incomplete extraction also fail the real
+run. Rejected facts are never saved. No PARTIAL_SUCCESS reporting is implemented;
+any future extension must disclose missing sources and exclude them from removal
+detection. Existing incomplete fixture warning runs can still be displayed but
+cannot replace a complete formal baseline.
+
 Pricing extraction keeps raw `plan_name` grounded in a contiguous quote. The
 provider derives `normalized_plan_name` with the existing server `slug()` only
 when the model's name is deterministically equivalent; a different plan is still

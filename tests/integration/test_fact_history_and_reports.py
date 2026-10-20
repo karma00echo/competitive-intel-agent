@@ -136,8 +136,8 @@ def test_failed_page_is_uncomparable_not_removed(persistence) -> None:
     assert len(current) == 9
 
 
-def test_completed_with_warnings_is_an_explicit_valid_baseline(persistence) -> None:
-    _runner(persistence).run("Notion")
+def test_incomplete_warning_run_cannot_replace_complete_baseline(persistence) -> None:
+    complete = _runner(persistence).run("Notion")
     warning_run = _runner(persistence, "page_failure").run("Notion")
     assert warning_run.final_state == AgentState.COMPLETED_WITH_WARNINGS
     competitor_id = _competitor_id(persistence)
@@ -161,7 +161,7 @@ def test_completed_with_warnings_is_an_explicit_valid_baseline(persistence) -> N
     baseline = FactHistoryService(persistence).get_previous_baseline(
         competitor_id, current.run_id
     )
-    assert baseline.previous_successful_run_id == warning_run.run_id
+    assert baseline.previous_successful_run_id == complete.run_id
 
 
 def test_feishu_unchanged_refresh_report(persistence) -> None:

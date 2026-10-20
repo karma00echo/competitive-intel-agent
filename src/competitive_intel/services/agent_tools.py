@@ -338,7 +338,7 @@ class AgentToolExecutor:
                 "normalized_name": competitor["normalized_name"],
                 "verified_source_count": len(sources),
                 "successful_snapshot_count": snapshots,
-                "confirmed_fact_count": 0 if mode_changed else facts,
+                "confirmed_fact_count": 0 if mode_changed or previous is None else facts,
                 "warnings": ["Fact provider changed; establish a new baseline instead of comparing fixture and real facts."] if mode_changed else [],
                 "recent_run_status": latest["status"] if latest else None,
             },
@@ -797,4 +797,18 @@ class AgentToolExecutor:
             fact_extraction_reason=fact_data.get("fact_extraction_reason"),
         )
         context.summary = summary
-        return ToolResult(True, {"summary": asdict(summary)})
+        page_calls = fact_data.get("provider_calls", [])
+        # Explicit provenance, not inferred from COMPLETED or a single-page smoke.
+        eligible = bool(facts and sources and report_data.get("report_id")) and (
+            not context.errors and not fact_data.get("errors")
+            and {s["id"] for s in sources} == {s["source_id"] for s in snapshots}
+            and all(s["fetch_status"] == "SUCCESS" for s in snapshots)
+            and {s["source_id"] for s in snapshots} == {c["source_id"] for c in page_calls}
+            and all(c.get("page_status") == "SUCCEEDED" and not c.get("rejected_count")
+                    for c in page_calls)
+            and all(f["comparison_status"] in {"BASELINE", "ADDED", "MODIFIED", "UNCHANGED"}
+                    for f in facts)
+        )
+        return ToolResult(True, {"summary": asdict(summary), "baseline_integrity": {
+            "version": 1, "run_kind": "FULL_AGENT_RUNNER", "eligible": eligible,
+            "source_ids": sorted(s["id"] for s in sources)}})
