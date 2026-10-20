@@ -10,6 +10,7 @@ from time import perf_counter
 
 from competitive_intel.domain.evidence import EvidenceChecker
 from competitive_intel.domain.fact_comparison import FactNormalizer
+from competitive_intel.domain.fact_conflicts import conflict_diagnostic, conflict_side
 from competitive_intel.domain.fact_normalization import normalize_fact
 from competitive_intel.domain.fact_schema import REQUIRED
 from competitive_intel.domain.facts import (
@@ -63,6 +64,7 @@ class FactExtractionService:
         historical_reuse_count = 0
         run_seen_keys: set[tuple[str, str]] = set()
         run_values: dict[tuple[str, str], str] = {}
+        run_provenance: dict[tuple[str, str], dict] = {}
         normalized_name = competitor_name.strip().casefold()
 
         with self._persistence.transaction() as session:
@@ -339,6 +341,12 @@ class FactExtractionService:
                             normalized.fact_category.value, normalized.fact_value):
                         rejected_for_page += 1
                         errors.append(f"Source {source['id']}: CONFLICTING_FACT_IDENTITY")
+                        audit.setdefault("identity_conflicts", []).append(
+                            conflict_diagnostic(
+                                identity, run_provenance[identity],
+                                conflict_side(normalized, source["id"], snapshot["id"]),
+                            )
+                        )
                         rejected.append(RejectedFact(normalized, EvidenceCheckStatus.CONFLICTING,
                             "Cross-source canonical values conflict.", source["url"], snapshot["id"]))
                         continue
@@ -461,6 +469,9 @@ class FactExtractionService:
                         continue
                 run_seen_keys.add(identity)
                 run_values[identity] = canonical
+                run_provenance[identity] = conflict_side(
+                    normalized, source["id"], snapshot["id"]
+                )
                 seen_keys.add(normalized.fact_key or "")
                 existing_keys.add(normalized.fact_key or "")
                 confirmed_for_page += 1

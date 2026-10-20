@@ -66,6 +66,8 @@ class Transport:
             payload["facts"].append(second)
         elif self.mode == "empty":
             payload["facts"] = []
+        elif self.mode == "cross_source_conflict" and self.count == 2:
+            payload["facts"][0]["fact_value"]["feature_description"] = "teams edit documents"
         data = {"choices":[{"finish_reason":"stop","message":{"content":json.dumps(payload)}}],
                 "usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}
         response = Mock(status_code=200)
@@ -281,3 +283,34 @@ def test_empty_page_can_complete_and_cannot_remove_prior_fact(persistence):
     output = next(json.loads(c["output_summary"]) for c in calls if c["tool_name"] == "extract_competitor_facts")
     assert output["provider_calls"][0]["page_status"] == "NO_FACTS"
     assert not any(c["change_type"] == "REMOVED" for c in changes)
+
+
+def test_cross_source_conflict_has_paired_audit_and_no_activation(persistence):
+    seed(persistence)
+    with persistence.transaction() as session:
+        competitor = persistence.competitors.get_by_normalized_name(session, "acme")
+        persistence.sources.create(session, competitor_id=competitor["id"],
+            source_type="FEATURES", url="https://acme.example/features",
+            normalized_url="https://acme.example/features", domain="acme.example",
+            verification_status="VERIFIED", confidence=0.99,
+            verified_at=datetime.now(UTC).replace(tzinfo=None))
+    result = runner(persistence, Transport(mode="cross_source_conflict")).run("Acme")
+    assert result.final_state == AgentState.FAILED
+    with persistence.transaction() as session:
+        calls = persistence.tool_calls.list_for_run(session, result.run_id)
+        observations = persistence.fact_observations.list_for_run(session, result.run_id)
+        assert not persistence.fact_versions.list_current(session, competitor["id"])
+        assert not persistence.changes.list_for_run(session, result.run_id)
+    assert observations and all(o["comparison_status"] == "PENDING" for o in observations)
+    output = next(json.loads(c["output_summary"]) for c in calls
+                  if c["tool_name"] == "extract_competitor_facts")
+    conflicts = [c for a in output["provider_calls"] for c in a.get("identity_conflicts", [])]
+    assert len(conflicts) == 1
+    pair = conflicts[0]
+    assert pair["canonical_identity"] == "feature.docs"
+    assert pair["previous"]["normalized_value"] != pair["incoming"]["normalized_value"]
+    assert pair["previous"]["source_id"] != pair["incoming"]["source_id"]
+    assert pair["previous"]["snapshot_id"] != pair["incoming"]["snapshot_id"]
+    assert pair["previous"]["evidence"] == pair["incoming"]["evidence"] == TEXT
+    assert not any(c["tool_name"] == "generate_competitor_report" for c in calls)
+    assert "test-only" not in json.dumps(pair)

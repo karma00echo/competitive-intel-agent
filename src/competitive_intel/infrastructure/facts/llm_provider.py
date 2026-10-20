@@ -26,7 +26,7 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-v9-literal-price-subject-full-alternative-span"
+POLICY_VERSION = "quoted-facts-v10-conservative-lists-and-classifications"
 PAGE_CATEGORIES = {
     "HOMEPAGE": (FactCategory.POSITIONING, FactCategory.FEATURE),
     "FEATURES": (FactCategory.FEATURE,),
@@ -48,6 +48,10 @@ can be copied from the SAME evidence. Do not fill lists merely because keys are 
     "FEATURES": """FEATURES contract: prioritize feature_name and feature_description.
 Quote a contiguous block that includes both. Category may use only explicit label
 or defined aliases. Missing status, availability and related_plan must be null.
+Agent, agent skills and orchestration do not imply AI; data syncs do not imply
+INTEGRATION; triggers do not imply AUTOMATION. These are semantic guesses, not
+explicit category labels. Return feature_category=null in all such cases unless
+the quote separately contains an explicit supported label.
 Do not duplicate a feature under spelling variants or create positioning facts.""",
     "PRICING": """PRICING contract: use PLAN for an explicitly named plan and its quoted
 description/features; use PRICE for one explicitly stated price of a named plan.
@@ -59,6 +63,14 @@ billing commitment from monthly equivalent prices. Use null for unsupported enum
 dimensions. Do not infer FREE or zero from absent prices. Copy explicitly listed
 plan features only from that plan's same quoted block. Skip prices whose plan
 cannot be linked within one quote. Amount must be a quoted numeric string.
+PLAN has no per-item evidence field. Prefer a small plan fact with its literal
+name and description. included_features=[] is valid, not a claim of no features.
+Only include list entries literally present in the SAME continuous quote.
+'Everything in Plus, and:' or 'Everything in Business, and:' does not support
+features copied from elsewhere or inherited from another plan. Do not expand
+inheritance. Do not create multiple PLAN facts with the same name to distribute
+different feature lists. Omit unsupported list items in the model output, never
+shorten or splice evidence to fit a larger list.
 Keep billing_period, billing_unit and billing_commitment independent. USAGE_BASED
 is not a synonym for MONTH, and USAGE is not a precise credit quantity. The current
 unit enum has no CREDITS or per-N-credits representation. Do not force credit prices
@@ -101,6 +113,9 @@ separate. published_date must be null unless an explicit ISO date occurs in that
 same quote; do not invent a year or reformat dates. Return null for unsupported
 status/update_type/availability; do not fill AVAILABLE, plans or feature_category.
 affected_features may contain only explicitly named features in this same quote.
+Return affected_features=[] when the selected quote does not name them, even if
+another release or your product knowledge mentions them. A title and paragraph
+separated by video warnings must include those warnings in the continuous quote.
 Choose a quote long enough to support both title and description, not a status-only
 sentence. Never use a neighboring release as evidence.""",
 }
@@ -201,6 +216,17 @@ def output_schema(request: FactExtractionRequest) -> dict:
                     "Explicitly quoted billing dimension only; null if unsupported. "
                     "Per 1,000 monthly credits does not establish a billing schedule "
                     "or an exactly representable unit: return null for this dimension."
+                )
+            if category == FactCategory.FEATURE and key == "feature_category":
+                fields[key]["description"] = (
+                    "null unless the SAME evidence explicitly contains the category "
+                    "label or an existing deterministic alias. Agent does not imply AI; "
+                    "syncs do not imply INTEGRATION; triggers do not imply AUTOMATION."
+                )
+            if key in {"included_features", "affected_features"}:
+                fields[key]["description"] = (
+                    "Only verbatim items in this fact's single contiguous evidence_text. "
+                    "Return [] for unsupported items; no inheritance or cross-block lists."
                 )
         variants.append(_object({
             "fact_category": {"type": "string", "enum": [category.value]},
