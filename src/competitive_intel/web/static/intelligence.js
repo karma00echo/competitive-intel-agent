@@ -94,7 +94,7 @@
   }
   function reportCard(item) {
     const card = node("article", undefined, "intel-card");
-    card.append(badge(item.report_type === "BASELINE" ? "Initial profile" : "Change report"), node("h3", item.name), node("small", fmtTime(item.generated_at)), node("p", `${item.run_status} · ${item.change_count} recorded changes · ${item.status}`));
+    card.append(badge(item.report_type === "PARTIAL_EVIDENCE" ? "PARTIAL_EVIDENCE · 部分证据，非完整报告" : item.report_type === "BASELINE" ? "Initial profile" : "Change report"), node("h3", item.name), node("small", fmtTime(item.generated_at)), node("p", `${item.run_status} · ${item.change_count} recorded changes · ${item.status}`));
     if (item.status === "GENERATED") actions(card, [["View report", `/reports/${item.id}`], ["Markdown ↓", `/api/reports/${item.id}/download?format=markdown`]]);
     actions(card, [["View run", `/developer/runs/${item.run_id}`]]); return card;
   }

@@ -81,6 +81,9 @@ class FactHistoryService:
     ) -> int:
         now = datetime.now(UTC).replace(tzinfo=None)
         with self._persistence.transaction() as session:
+            run = self._persistence.agent_runs.get(session, current_run_id)
+            if run and run['status'] in {'PARTIAL_SUCCESS', 'FAILED'}:
+                raise ValueError('Incomplete runs cannot activate a baseline.')
             facts = self._persistence.fact_observations.list_for_run(
                 session, current_run_id
             )
@@ -108,6 +111,10 @@ class FactHistoryService:
         previous_successful_run_id: int,
     ) -> PersistedComparison:
         with self._persistence.transaction() as session:
+            for run_id in (current_run_id, previous_successful_run_id):
+                run = self._persistence.agent_runs.get(session, run_id)
+                if run and run['status'] in {'PARTIAL_SUCCESS', 'FAILED'}:
+                    raise ValueError('Incomplete runs cannot participate in comparison.')
             current = self._persistence.fact_observations.list_for_run(
                 session, current_run_id
             )

@@ -116,7 +116,7 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
         summary.setdefault("errors", extraction.get("errors", []))
     final_state = summary.get("final_state")
     if not final_state:
-        final_state = "FAILED" if run["status"] == "FAILED" else (
+        final_state = run["status"] if run["status"] in {"FAILED", "PARTIAL_SUCCESS"} else (
             run["current_state"] if run["status"] == "RUNNING" else "COMPLETED"
         )
     warnings = summary.get("warnings", [])
@@ -597,6 +597,11 @@ def workspace_run(request: Request, run_id: int) -> APIEnvelope:
     )
 
     sources = [_source_view(source) for source in raw_sources[:50]]
+    partial_content = (decode_json(report_record.get("summary_json")) or {}).get("content_json", {}) if report_record else {}
+    if run.get("final_state") == "PARTIAL_SUCCESS":
+        allowed_ids = set(partial_content.get("visible_fact_ids", []))
+        raw_facts = [f for f in raw_facts if f["id"] in allowed_ids]
+        run["failed_source_count"] = partial_content.get("failed_source_count", 0)
     facts = [
         {
             "fact_id": fact["id"],
@@ -611,6 +616,8 @@ def workspace_run(request: Request, run_id: int) -> APIEnvelope:
             "confidence": float(fact["observed_confidence"]),
             "evidence_excerpt": fact["observed_evidence"][:500],
             "source_url": fact["observed_source_url"],
+            "observation_status": fact["comparison_status"],
+            "snapshot_id": fact["observed_snapshot_id"],
         }
         for fact in raw_facts[:100]
     ]

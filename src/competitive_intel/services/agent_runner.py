@@ -29,6 +29,7 @@ from .agent_tools import (
     AgentToolExecutor,
     validate_tool_arguments,
 )
+from .partial_result_service import PartialResultService, needs_partial
 
 
 EventSink = Callable[[dict[str, Any]], None]
@@ -51,6 +52,7 @@ PERSISTED_STATE = {
     AgentState.RUN_SUMMARY: "REPORT_GENERATION",
     AgentState.COMPLETED: "COMPLETED",
     AgentState.COMPLETED_WITH_WARNINGS: "COMPLETED",
+    AgentState.PARTIAL_SUCCESS: "COMPLETED",
     AgentState.FAILED: "FAILED",
 }
 
@@ -244,17 +246,21 @@ class AgentRunner:
                     input_summary=self._safe_value(call.arguments),
                 )
             result = self._tools.execute(call.name, call.arguments, context)
-            with self._persistence.transaction() as session:
-                self._persistence.tool_calls.finish(
-                    session,
-                    tool_call_id,
-                    status="SUCCEEDED" if result.ok else "FAILED",
-                    output_summary=self._safe_value(result.data),
-                    retryable=result.retryable,
-                    duration_ms=max(0, int((perf_counter() - started) * 1000)),
-                    error_code=result.error_code,
-                    error_message=(result.error_message or "")[:500] or None,
-                )
+            try:
+                with self._persistence.transaction() as session:
+                    self._persistence.tool_calls.finish(
+                        session,
+                        tool_call_id,
+                        status="SUCCEEDED" if result.ok else "FAILED",
+                        output_summary=self._safe_value(result.data),
+                        retryable=result.retryable,
+                        duration_ms=max(0, int((perf_counter() - started) * 1000)),
+                        error_code=result.error_code,
+                        error_message=(result.error_message or "")[:500] or None,
+                    )
+            except Exception as exc:
+                return self._fail(context, stage_id, "CRITICAL_AUDIT_FAILED",
+                                  f"Tool audit failed: {type(exc).__name__}")
             context.tool_results[call.name] = result
             self._collect_messages(context, result)
             messages.extend(
@@ -278,6 +284,29 @@ class AgentRunner:
                 result=self._safe_value(result.data),
                 error_code=result.error_code,
             )
+            if (call.name == "extract_competitor_facts"
+                    and result.error_code in {None, "FACT_EXTRACTION_FAILED"}
+                    and needs_partial(result.data, context.tool_results["refresh_verified_sources"].data)):
+                try:
+                    if context.remaining_tool_budget <= 0:
+                        raise ValueError('PARTIAL_AUDIT_BUDGET_EXHAUSTED')
+                    context.summary = PartialResultService(self._persistence).complete(
+                        context, stage_id, result.data,
+                        context.tool_results["refresh_verified_sources"].data)
+                except Exception as exc:
+                    reason = str(exc) if isinstance(exc, ValueError) and str(exc) in {
+                        "UNIDENTIFIED_CONFLICT", "MISSING_CONFLICT_AUDIT",
+                        "INVALID_PARTIAL_RUN", "MISSING_EXTRACTION_AUDIT",
+                        "INVALID_PARTIAL_PROVENANCE", "NO_UNCONTESTED_VERIFIED_FACTS",
+                    } else type(exc).__name__
+                    return self._fail(context, stage_id, "PARTIAL_RESULT_FAILED",
+                                      f"Partial publication rejected: {reason}")
+                previous = context.current_state
+                context.current_state = AgentState.PARTIAL_SUCCESS
+                context.transitions.append((previous, context.current_state))
+                context.tool_call_count += 1
+                self._emit_event("run_completed", context)
+                return self._result(context)
             if not result.ok:
                 if (
                     result.retryable

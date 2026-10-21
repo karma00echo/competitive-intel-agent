@@ -25,6 +25,7 @@ STATE_LABELS = {
     "COMPLETED": "已完成",
     "COMPLETED_WITH_WARNINGS": "带警告完成",
     "FAILED": "失败",
+    "PARTIAL_SUCCESS": "部分成功 · 非完整分析",
 }
 
 TOOL_LABELS = {
@@ -58,9 +59,10 @@ STATE_PROGRESS = {
     "COMPLETED": 100,
     "COMPLETED_WITH_WARNINGS": 100,
     "FAILED": 100,
+    "PARTIAL_SUCCESS": 100,
 }
 
-TERMINAL_STATES = {"COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED"}
+TERMINAL_STATES = {"COMPLETED", "COMPLETED_WITH_WARNINGS", "PARTIAL_SUCCESS", "FAILED"}
 
 
 def progress_for_events(events: list[dict[str, Any]], current_state: str) -> int:
@@ -212,6 +214,8 @@ def _tool_provider(call: dict[str, Any]) -> str:
 
 def _final_text(run: dict[str, Any]) -> str:
     state = run.get("final_state")
+    if state == "PARTIAL_SUCCESS":
+        return "PARTIAL_SUCCESS：仅部分证据；观察为 PENDING，未激活基线，未执行变化检测。"
     if state == "FAILED":
         return "运行失败；请在执行轨迹中查看已记录错误。"
     if state == "COMPLETED_WITH_WARNINGS":

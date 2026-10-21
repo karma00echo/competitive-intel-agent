@@ -73,6 +73,8 @@ class CompetitorReportService:
             )
         if competitor is None or run is None:
             raise ValueError("Competitor or run does not exist.")
+        if run['status'] in {'PARTIAL_SUCCESS', 'FAILED'}:
+            raise ValueError('Incomplete runs cannot generate formal reports.')
         if existing:
             summary = _decode(existing["summary_json"]) or {}
             return self._from_record(existing, summary)
@@ -142,7 +144,7 @@ class CompetitorReportService:
             if report_id is not None:
                 record = self._persistence.reports.get(session, report_id)
             elif run_id is not None:
-                for report_type in ("CHANGE_TRACKING", "BASELINE"):
+                for report_type in ("CHANGE_TRACKING", "BASELINE", "PARTIAL_EVIDENCE"):
                     record = self._persistence.reports.get_for_run(
                         session, run_id, report_type
                     )

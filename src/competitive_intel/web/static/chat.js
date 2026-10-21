@@ -41,6 +41,7 @@
     const expanded=box.querySelector('details')?.open || false;
     const run=data.run, state=run.final_state||run.current_state;
     box.replaceChildren(node('h2',`Agent · ${run.competitor}`));
+    if(state==='PARTIAL_SUCCESS') box.append(node('p',`PARTIAL_SUCCESS · ${run.confirmed_fact_count} 条可展示事实，${run.failed_source_count||0} 个失败/部分失败来源。仅部分证据，观察保持 PENDING；未建立基线或执行变化检测。`,'chat-notice'));
     const provider=record.provider || data.provider_summary.search_provider;
     const llm=record.factProvider==='openai_compatible'||data.provider_summary.fact_provider==='openai_compatible';
     box.append(node('p',provider==='serper'?(llm?'真实搜索 / 真实网页 / LLM 原文证据提取。':'真实 Serper 搜索 / 真实网页；事实提取跳过。'):provider==='fixture'?'Fixture 离线演示 · 不是实时竞品研究结果。':'历史运行 · Provider 以完整审计记录为准。','chat-notice'));
@@ -128,7 +129,7 @@
       if(epoch!==revision)return;
       if(command.action==='pricing')views.fill(result,data.facts.filter(f=>['PRICE','PLAN'].includes(f.category)),views.factCard,'暂无已确认的公开价格；不能解释为免费。');
       if(command.action==='sources')views.fill(result,data.sources,views.sourceCard,'尚无来源记录。');
-      if(command.action==='report')views.fill(result,data.reports.slice(0,1),views.reportCard,'尚无正式报告。');
+      if(command.action==='report')views.fill(result,data.reports.filter(r=>r.report_type!=='PARTIAL_EVIDENCE').slice(0,1),views.reportCard,'尚无正式报告。');
       box.append(link('完整竞品档案',`/competitors/${competitor.competitor_id}`));
     }catch(error){if(epoch===revision)box.append(node('p',`请求失败：${error.message}。没有生成研究结论。`));}
   }

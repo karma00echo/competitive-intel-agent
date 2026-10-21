@@ -1,8 +1,9 @@
 const $=(id)=>document.getElementById(id);
 const page=document.body.dataset.page;
 const resourceId=document.body.dataset.resourceId;
-const terminal=new Set(["COMPLETED","COMPLETED_WITH_WARNINGS","FAILED"]);
+const terminal=new Set(["COMPLETED","COMPLETED_WITH_WARNINGS","PARTIAL_SUCCESS","FAILED"]);
 const stateLabels={INITIALIZING:"初始化",PROFILE_LOOKUP:"查询竞品档案",MODE_SELECTION:"选择运行模式",SOURCE_DISCOVERY:"发现来源",SOURCE_VALIDATION:"验证来源",PAGE_FETCHING:"抓取页面",SNAPSHOT_PERSISTENCE:"保存快照",FACT_EXTRACTION:"提取事实",FACT_PERSISTENCE:"保存事实",HISTORY_LOOKUP:"查找历史基线",FACT_COMPARISON:"比较事实",CHANGE_PERSISTENCE:"保存变化",REPORT_GENERATION:"生成报告",REPORT_PERSISTENCE:"保存报告",RUN_SUMMARY:"汇总运行",COMPLETED:"已完成",COMPLETED_WITH_WARNINGS:"带警告完成",FAILED:"失败"};
+stateLabels.PARTIAL_SUCCESS="PARTIAL_SUCCESS · 部分证据，非完整分析";
 const stages=Object.keys(stateLabels);
 function node(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=String(text);if(cls)e.className=cls;return e}
 function link(text,href){const a=node("a",text);a.href=/^(https?:\/\/|\/)/i.test(href||"")?href:"#";return a}

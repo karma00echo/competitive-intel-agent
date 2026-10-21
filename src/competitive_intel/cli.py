@@ -91,7 +91,7 @@ def _fixture_only(value: str, kind: str) -> None:
 def exit_code_for_state(state: AgentState) -> int:
     if state == AgentState.COMPLETED:
         return 0
-    if state == AgentState.COMPLETED_WITH_WARNINGS:
+    if state in {AgentState.COMPLETED_WITH_WARNINGS, AgentState.PARTIAL_SUCCESS}:
         return 2
     return 1
 

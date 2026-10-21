@@ -330,12 +330,12 @@ class OnePageFailingFetcher(FixturePageFetcher):
         return result
 
 
-def test_single_page_failure_completes_with_warnings(persistence) -> None:
+def test_single_page_failure_returns_partial_evidence(persistence) -> None:
     runner, _ = _build_runner(
         persistence, fetcher=OnePageFailingFetcher()
     )
     result = runner.run("Notion")
-    assert result.final_state == AgentState.COMPLETED_WITH_WARNINGS
+    assert result.final_state == AgentState.PARTIAL_SUCCESS
     assert result.summary is not None
     assert result.summary.page_fetch_success_count == 3
     assert result.summary.page_fetch_failure_count == 1

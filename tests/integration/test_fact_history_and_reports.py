@@ -126,10 +126,10 @@ def test_feature_removed_fixture_requires_successful_source(persistence) -> None
 def test_failed_page_is_uncomparable_not_removed(persistence) -> None:
     _runner(persistence).run("Notion")
     refresh = _runner(persistence, "page_failure").run("Notion")
-    assert refresh.final_state == AgentState.COMPLETED_WITH_WARNINGS
+    assert refresh.final_state == AgentState.PARTIAL_SUCCESS
     assert refresh.summary.removed_count == 0
-    assert refresh.summary.uncomparable_count == 5
-    assert refresh.summary.unchanged_count == 4
+    assert refresh.summary.uncomparable_count == 0
+    assert refresh.summary.unchanged_count == 0
     competitor_id = _competitor_id(persistence)
     with persistence.transaction() as session:
         current = persistence.fact_versions.list_current(session, competitor_id)
@@ -139,7 +139,7 @@ def test_failed_page_is_uncomparable_not_removed(persistence) -> None:
 def test_incomplete_warning_run_cannot_replace_complete_baseline(persistence) -> None:
     complete = _runner(persistence).run("Notion")
     warning_run = _runner(persistence, "page_failure").run("Notion")
-    assert warning_run.final_state == AgentState.COMPLETED_WITH_WARNINGS
+    assert warning_run.final_state == AgentState.PARTIAL_SUCCESS
     competitor_id = _competitor_id(persistence)
     with persistence.transaction() as session:
         failed_run = persistence.agent_runs.create(

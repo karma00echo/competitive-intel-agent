@@ -758,6 +758,7 @@ class ReportRepository:
             """
             SELECT * FROM reports
             WHERE competitor_id = :competitor_id AND status = 'GENERATED'
+              AND report_type IN ('BASELINE', 'CHANGE_TRACKING')
             ORDER BY generated_at DESC, id DESC
             LIMIT 1
             """,
@@ -1224,7 +1225,8 @@ class DashboardRepository:
                      AND ch.change_type != 'UNCHANGED'
                      AND ch.created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY) AS signal_count,
                    (SELECT r.id FROM reports r WHERE r.competitor_id = c.id
-                     AND r.status = 'GENERATED' ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS report_id,
+                     AND r.status = 'GENERATED' AND r.report_type IN ('BASELINE', 'CHANGE_TRACKING')
+                     ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS report_id,
                    (ar.status = 'COMPLETED' AND NOT EXISTS(
                      SELECT 1 FROM reports r WHERE r.run_id = ar.id AND r.status = 'GENERATED')) AS missing_report
             FROM competitors c LEFT JOIN latest ar ON ar.competitor_id = c.id AND ar.rn = 1
@@ -1234,7 +1236,7 @@ class DashboardRepository:
             FROM latest WHERE competitor_id IS NULL AND rn = 1
         )
     """
-    _ATTENTION = "(run_status = 'FAILED' OR has_warnings OR verified_source_count = 0 OR pending_source_count > 0 OR unknown_count > 0 OR missing_report)"
+    _ATTENTION = "(run_status IN ('FAILED', 'PARTIAL_SUCCESS') OR has_warnings OR verified_source_count = 0 OR pending_source_count > 0 OR unknown_count > 0 OR missing_report)"
 
     def intelligence_cards(self, session: Session, *, limit: int, offset: int,
                            attention: bool = False, competitor_id: int | None = None) -> list[Record]:
@@ -1361,11 +1363,12 @@ class DashboardRepository:
                    (SELECT ar.id FROM agent_runs ar
                     WHERE ar.competitor_id = c.id
                     ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_id,
-                   (SELECT ar.current_state FROM agent_runs ar
+                   (SELECT IF(ar.status = 'PARTIAL_SUCCESS', ar.status, ar.current_state) FROM agent_runs ar
                     WHERE ar.competitor_id = c.id
                     ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_status,
                    (SELECT r.id FROM reports r
                     WHERE r.competitor_id = c.id AND r.status = 'GENERATED'
+                      AND r.report_type IN ('BASELINE', 'CHANGE_TRACKING')
                     ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS latest_report_id
             FROM competitors c
             {where}
@@ -1404,6 +1407,7 @@ class DashboardRepository:
                     ORDER BY ar.started_at DESC, ar.id DESC LIMIT 1) AS latest_run_id,
                    (SELECT r.id FROM reports r
                     WHERE r.competitor_id = c.id AND r.status = 'GENERATED'
+                      AND r.report_type IN ('BASELINE', 'CHANGE_TRACKING')
                     ORDER BY r.generated_at DESC, r.id DESC LIMIT 1) AS latest_report_id
             FROM competitors c WHERE c.id = :id
             """,

@@ -25,6 +25,7 @@ class AgentState(StrEnum):
     RUN_SUMMARY = "RUN_SUMMARY"
     COMPLETED = "COMPLETED"
     COMPLETED_WITH_WARNINGS = "COMPLETED_WITH_WARNINGS"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
     FAILED = "FAILED"
 
 
@@ -34,6 +35,7 @@ class RunMode(StrEnum):
 
 
 TERMINAL_STATES = {
+    AgentState.PARTIAL_SUCCESS,
     AgentState.COMPLETED,
     AgentState.COMPLETED_WITH_WARNINGS,
     AgentState.FAILED,
@@ -67,7 +69,7 @@ ALLOWED_TRANSITIONS: dict[AgentState, frozenset[AgentState]] = {
         {AgentState.FACT_EXTRACTION, AgentState.FAILED}
     ),
     AgentState.FACT_EXTRACTION: frozenset(
-        {AgentState.FACT_PERSISTENCE, AgentState.FAILED}
+        {AgentState.FACT_PERSISTENCE, AgentState.FAILED, AgentState.PARTIAL_SUCCESS}
     ),
     AgentState.FACT_PERSISTENCE: frozenset(
         {
@@ -100,6 +102,7 @@ ALLOWED_TRANSITIONS: dict[AgentState, frozenset[AgentState]] = {
     ),
     AgentState.COMPLETED: frozenset(),
     AgentState.COMPLETED_WITH_WARNINGS: frozenset(),
+    AgentState.PARTIAL_SUCCESS: frozenset(),
     AgentState.FAILED: frozenset(),
 }
 

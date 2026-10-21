@@ -231,7 +231,7 @@ def test_null_feature_fields_persist_as_audited_legacy_sentinels(persistence):
 def test_partial_page_saves_only_valid_facts_without_comparison_or_cache(persistence):
     seed(persistence)
     result = runner(persistence, Transport(mode="partial")).run("Acme")
-    assert result.final_state == AgentState.FAILED
+    assert result.final_state == AgentState.PARTIAL_SUCCESS
     with persistence.transaction() as session:
         facts = persistence.product_facts.list_for_run(session, result.run_id)
         calls = persistence.tool_calls.list_for_run(session, result.run_id)
@@ -270,11 +270,11 @@ def test_conflicting_values_are_both_rejected_and_audited(persistence):
     assert paired["canonical_identity"] == "feature.docs"
 
 
-def test_empty_page_can_complete_and_cannot_remove_prior_fact(persistence):
+def test_empty_page_has_no_publishable_result_and_cannot_remove_prior_fact(persistence):
     seed(persistence)
     first = runner(persistence, Transport()).run("Acme")
     second = runner(persistence, Transport(mode="empty"), model="new-policy").run("Acme")
-    assert second.final_state in {AgentState.COMPLETED, AgentState.COMPLETED_WITH_WARNINGS}
+    assert second.final_state == AgentState.FAILED
     with persistence.transaction() as session:
         calls = persistence.tool_calls.list_for_run(session, second.run_id)
         changes = persistence.changes.list_for_run(session, second.run_id)

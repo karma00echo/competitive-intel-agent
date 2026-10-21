@@ -1,5 +1,16 @@
 # Universal Competitive Intelligence Agent
 
+## Stage 9.1.4: conservative partial results
+
+`PARTIAL_SUCCESS` publishes an independent `PARTIAL_EVIDENCE` report only when
+uncontested, evidence-validated facts exist. Observations stay PENDING; partial
+runs never replace a formal baseline or generate Changes/Signals. Report,
+critical audit and terminal status are committed atomically. See
+[migration, recovery and MVP/reliability boundaries](docs/stage-9.1.4-closeout.md).
+Apply migration `003_partial_success.sql` through the existing initializer before
+deploying this version. A passing offline suite is **not** full Notion end-to-end
+reliability acceptance.
+
 ## Stage 9.1: real LLM fact extraction
 
 ### Stage 9.1.2: reliability and baseline integrity
