@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "purpose": "Stage 9.2.1 live DeepSeek acceptance gold set; no execution authorization",
+  "frozen_implementation_commit": "d5a395d",
+  "smoke_case_ids": [
+    "T01",
+    "T02",
+    "T05",
+    "T06",
+    "T08",
+    "T10"
+  ],
+  "max_calls_full_set": 12,
+  "scoring": {
+    "ready": "Exact status, literal target and competitors, intent, dimensions as a set, output_format and discover_competitors. clarification must be null.",
+    "clarification": "Exact NEEDS_CLARIFICATION status plus a specific question resolving the documented ambiguity; unresolved intent/dimension defaults are not graded. No invented product names. T10 allows null target.",
+    "prose": "Assumptions and clarification are graded semantically, not by exact Chinese wording; no factual claims or completed work may be invented.",
+    "failures": "HTTP/provider/schema failures count as failures in end-to-end case success; also report semantic accuracy among valid responses separately.",
+    "status": "NOT_RUN"
+  },
+  "cases": [
+    {
+      "id": "T01",
+      "category": "明确单目标分析",
+      "input": "分析豆包",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [
+          "未指定的维度使用默认六维；未指定竞品时仅计划后续发现，不代表已发现或验证。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "目标只有豆包；不要将整句作为产品名",
+        "不要求网址、不要求用户先提供竞品"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T02",
+      "category": "显式指定竞品",
+      "input": "比较豆包和 Kimi",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "comparison",
+        "competitors": [
+          "Kimi"
+        ],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": false,
+        "assumptions": [
+          "未指定维度，使用六个默认维度。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "不得增加未提及竞品"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T03",
+      "category": "自动竞品发现意图",
+      "input": "帮我分析豆包及其主要竞争对手。",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [
+          "未指定的维度使用默认六维；未指定竞品时仅计划后续发现，不代表已发现或验证。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "competitors 为空；discover_competitors 为 true",
+        "本阶段不输出已发现的竞争对手或产品事实"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T04",
+      "category": "指定单个维度",
+      "input": "只分析豆包的核心功能",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "product_analysis",
+        "competitors": [],
+        "dimensions": [
+          "core_features"
+        ],
+        "output_format": "report",
+        "discover_competitors": false,
+        "assumptions": [],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "只分析目标，不扩展竞品或定价维度"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T05",
+      "category": "多个维度",
+      "input": "分析豆包的核心功能和定价策略",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "core_features",
+          "pricing"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [
+          "未指定竞品，计划后续自动发现。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "定价策略映射定价分析，不生成商业事实或市场预测"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T06",
+      "category": "模糊指代",
+      "input": "分析它",
+      "expected": {
+        "status": "NEEDS_CLARIFICATION",
+        "target": null,
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [],
+        "clarification": "你指的是哪个产品？"
+      },
+      "semantic_checks": [
+        "必须询问产品名，不能用模型记忆补全它的指代"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T07",
+      "category": "缺失目标",
+      "input": "请做一份竞品分析报告",
+      "expected": {
+        "status": "NEEDS_CLARIFICATION",
+        "target": null,
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [],
+        "clarification": "请提供要分析的目标产品名称。"
+      },
+      "semantic_checks": [
+        "不能猜测目标，不要求网站地址"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T08",
+      "category": "复杂自然语言",
+      "input": "我在给写作团队选工具，拿豆包跟 Kimi 看看，重点是面向谁和收费方式；给我一张表，不要再加其他产品。",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "comparison",
+        "competitors": [
+          "Kimi"
+        ],
+        "dimensions": [
+          "target_users",
+          "pricing"
+        ],
+        "output_format": "table",
+        "discover_competitors": false,
+        "assumptions": [],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "保留负向约束：不扩展竞品",
+        "写作团队是用户背景，不自动当成产品的已知目标用户"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T09",
+      "category": "不应澄清的输入",
+      "input": "分析 AcmeNote 这个产品",
+      "expected": {
+        "status": "READY",
+        "target": "AcmeNote",
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [
+          "未指定的维度使用默认六维；未指定竞品时仅计划后续发现，不代表已发现或验证。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "未知品牌不等于输入缺失；保留字面名称 READY",
+        "产品身份待后续验证，不臆造官网、公司或功能"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T10",
+      "category": "必须澄清的输入",
+      "input": "分析苹果",
+      "expected": {
+        "status": "NEEDS_CLARIFICATION",
+        "target": "苹果",
+        "intent": "competitive_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": true,
+        "assumptions": [],
+        "clarification": "你指的是苹果公司的哪款产品，还是另一个名为苹果的产品？"
+      },
+      "semantic_checks": [
+        "不能默认为公司、手机或其他具体产品",
+        "target 也可为 null，但不得是推测出来的 iPhone 等名称"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T11",
+      "category": "冲突范围必须澄清",
+      "input": "只分析豆包，不比较其他产品，但也要比较 Kimi",
+      "expected": {
+        "status": "NEEDS_CLARIFICATION",
+        "target": "豆包",
+        "intent": "product_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": false,
+        "assumptions": [],
+        "clarification": "你希望只分析豆包，还是与 Kimi 比较？"
+      },
+      "semantic_checks": [
+        "不得静默选择某一冲突指令并标 READY"
+      ],
+      "live_status": "NOT_RUN"
+    },
+    {
+      "id": "T12",
+      "category": "明确禁止自动发现",
+      "input": "只分析豆包，不比较其他产品",
+      "expected": {
+        "status": "READY",
+        "target": "豆包",
+        "intent": "product_analysis",
+        "competitors": [],
+        "dimensions": [
+          "positioning",
+          "target_users",
+          "core_features",
+          "ai_capabilities",
+          "pricing",
+          "differentiation"
+        ],
+        "output_format": "report",
+        "discover_competitors": false,
+        "assumptions": [
+          "未指定维度，使用六个默认维度。"
+        ],
+        "clarification": null
+      },
+      "semantic_checks": [
+        "不得添加竞品或开启自动发现"
+      ],
+      "live_status": "NOT_RUN"
+    }
+  ]
+}
