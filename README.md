@@ -16,8 +16,9 @@ This stage does not discover competitors, execute comparisons, generate reports,
 or connect free-language execution to Chat-first. Existing shortcuts remain, with
 guards against launching a whole analysis sentence as a product name. See
 [Stage 9.2.1 scope, validation and migration blocker](docs/stage-9.2.1-task-understanding.md).
-Production migration 003 remains unapplied, pending verified restore and separate
-user approval. Stage 9.1 full real end-to-end reliability acceptance remains open.
+Production migration 003 remains unapplied, pending separate user approval.
+[Isolated backup restoration and migration rehearsal passed](docs/database-restore-verification-2026-10-21.md).
+Stage 9.1 full real end-to-end reliability acceptance remains open.
 
 ## Stage 9.1.4: conservative partial results
 

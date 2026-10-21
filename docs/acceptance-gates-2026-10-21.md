@@ -1,5 +1,8 @@
 # 验收缺口核对与执行门禁（2026-10-21）
 
+后续更新：管理员授权后，[隔离恢复及 003 迁移演练已通过](database-restore-verification-2026-10-21.md)。
+下文保留此前权限阻塞时的调查记录；正式迁移仍未执行，真实 E2E 验收状态不变。
+
 实现冻结在 `d5a395d`。本次只读核查与准备验收材料，不修改 Task
 Understanding、Evidence Validator、迁移脚本或历史数据；不进入 9.2.2。
 本轮没有调用 Serper、DeepSeek 或执行真实完整分析。
