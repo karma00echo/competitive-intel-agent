@@ -1,5 +1,24 @@
 # Universal Competitive Intelligence Agent
 
+## Stage 9.2.1: standalone natural-language task understanding
+
+`python -m competitive_intel.cli interpret "分析豆包"` previews a structured
+`AnalysisTaskSpec`, without creating a run or accessing MySQL. The offline Fixture
+grammar is a labelled demonstrator; the real `openai_compatible` adapter interprets
+free language through one schema-constrained model request, followed by server
+validation. Real CLI use requires both `--provider openai_compatible --allow-paid`.
+No paid request was made during development. The same preview is available through
+`POST /api/analyst/interpret` with `{"text":"比较豆包和 Kimi","provider":"fixture"}`.
+Explicitly selecting `openai_compatible` on that endpoint authorizes one model call;
+configuration alone never switches a Fixture request to a paid provider.
+
+This stage does not discover competitors, execute comparisons, generate reports,
+or connect free-language execution to Chat-first. Existing shortcuts remain, with
+guards against launching a whole analysis sentence as a product name. See
+[Stage 9.2.1 scope, validation and migration blocker](docs/stage-9.2.1-task-understanding.md).
+Production migration 003 remains unapplied, pending verified restore and separate
+user approval. Stage 9.1 full real end-to-end reliability acceptance remains open.
+
 ## Stage 9.1.4: conservative partial results
 
 `PARTIAL_SUCCESS` publishes an independent `PARTIAL_EVIDENCE` report only when

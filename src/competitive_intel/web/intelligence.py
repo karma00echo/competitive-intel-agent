@@ -99,7 +99,11 @@ def parse_analyst_command(text):
         return {"action": "unsupported", "message": "暂不支持自由多轮推理或跨竞品比较。可输入：分析 Notion、查看 Linear 最近变化、查看 Notion 当前价格。"}
     match = re.fullmatch(r"(?:帮我|请)?(?:重新分析|分析)\s*(.+?)(?:\s*这个产品)?", text)
     if match:
-        return {"action": "analyze", "name": match[1]}
+        name = match[1]
+        # Keep legacy single-product shortcuts; never launch a run for a sentence.
+        if re.search(r"竞品|竞争对手|的(?:核心|功能|定价|价格|定位|目标|AI|差异)|.+(?:和|与|及).+|，|,|表格|策略", name):
+            return {"action": "unsupported", "message": "此请求涉及竞品或指定分析维度，聊天执行尚未接入。当前可通过开发工具预览任务理解结果。"}
+        return {"action": "analyze", "name": name}
     match = re.fullmatch(r"打开运行\s+(\d+)", text)
     if match:
         return {"action": "run", "run_id": int(match[1])}

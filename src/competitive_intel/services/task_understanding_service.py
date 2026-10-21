@@ -1,0 +1,34 @@
+"""Validate a single interpretation without starting or persisting an analysis."""
+
+import re
+
+from pydantic import ValidationError
+
+from competitive_intel.domain.analysis_task import AnalysisTaskSpec, InterpretTaskRequest
+from competitive_intel.infrastructure.agent.task_understanding import PROMPT_VERSION, TaskUnderstandingProvider
+
+
+class TaskUnderstandingService:
+    def __init__(self, provider: TaskUnderstandingProvider):
+        self.provider = provider
+
+    def interpret(self, text: str) -> dict:
+        request = InterpretTaskRequest(text=text)
+        result = self.provider.interpret(request.text)
+        audit = {"provider": self.provider.name, "prompt_version": PROMPT_VERSION,
+                 "model": getattr(self.provider, "model", None),
+                 "attempts": result.attempts, "usage": result.usage or None,
+                 "duration_ms": result.duration_ms, "execution_started": False}
+        if result.error:
+            return {"status": "FAILED", "task": None, "error_code": result.error, "audit": audit}
+        try:
+            task = AnalysisTaskSpec.model_validate(result.payload)
+            # Names must come from the request; automatic discovery happens later.
+            for name in ([task.target] if task.target else []) + task.competitors:
+                if name.casefold() not in request.text.casefold():
+                    raise ValueError("Invented product")
+                if re.search(r"^(?:帮我|请)?(?:分析|比较|对比)|^(?:analyze|compare)\s|竞品|竞争对手|[，。！？]", name, re.I):
+                    raise ValueError("Request mistaken for product")
+        except (ValidationError, ValueError):
+            return {"status": "FAILED", "task": None, "error_code": "INVALID_TASK_SPEC", "audit": audit}
+        return {"status": task.status, "task": task.model_dump(), "error_code": None, "audit": audit}

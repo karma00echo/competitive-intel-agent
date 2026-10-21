@@ -39,6 +39,10 @@ class Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = Parser(prog="competitive-intel")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    interpret = subparsers.add_parser("interpret", help="Preview a task without executing analysis")
+    interpret.add_argument("text")
+    interpret.add_argument("--provider", choices=("fixture", "openai_compatible"), default="fixture")
+    interpret.add_argument("--allow-paid", action="store_true")
     analyze = subparsers.add_parser("analyze")
     analyze.add_argument("competitor")
     analyze.add_argument("--search-provider", default="fixture")
@@ -99,6 +103,19 @@ def exit_code_for_state(state: AgentState) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
+        if args.command == "interpret":
+            from competitive_intel.infrastructure.agent.task_understanding import (
+                FixtureTaskUnderstandingProvider, LLMTaskUnderstandingProvider,
+            )
+            from competitive_intel.services.task_understanding_service import TaskUnderstandingService
+
+            if args.provider == "openai_compatible" and not args.allow_paid:
+                raise CLIArgumentError("Real interpretation requires --allow-paid (at most one model request).")
+            provider = (FixtureTaskUnderstandingProvider() if args.provider == "fixture"
+                        else LLMTaskUnderstandingProvider(Settings.from_env().llm))
+            result = TaskUnderstandingService(provider).interpret(args.text)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["status"] == "READY" else 1 if result["status"] == "FAILED" else 2
         settings = Settings.from_env()
         if args.command == "analyze" and args.max_tool_calls < 1:
             raise CLIArgumentError("--max-tool-calls must be at least 1.")
