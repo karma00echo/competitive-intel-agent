@@ -58,6 +58,57 @@ PERSISTED_STATE = {
 
 
 class AgentRunner:
+    @classmethod
+    def discover_competitors(cls, persistence, task, discovery):
+        """Stage 9.2.2 branch of the main runner, not a historical comparison run.
+
+        READY means discovery only. The run remains UNKNOWN, unbound to a product,
+        with no report, facts, observations, Changes or baseline eligibility.
+        """
+        tool = TOOL_DEFINITIONS["discover_competitors"]
+        with persistence.transaction() as session:
+            run_id = persistence.agent_runs.create(
+                session, input_name=task.target or "Unresolved analysis",
+                normalized_input=(task.target or "unresolved").casefold(), max_tool_calls=1)
+            stage_id = persistence.stage_events.create(
+                session, run_id=run_id, stage="SOURCE_DISCOVERY", attempt_no=1, max_attempts=1,
+                details={"phase": "competitor_discovery", "task_id": discovery.context.budget.task_id})
+            call_id = persistence.tool_calls.create(
+                session, run_id=run_id, stage_event_id=stage_id, call_index=1,
+                tool_name=tool.name, input_summary={"task": task.model_dump()})
+        def checkpoint(budget):
+            with persistence.transaction() as session:
+                persistence.tool_calls.checkpoint(session, call_id,
+                    output_summary={"phase": "competitor_discovery", "budget": budget,
+                                    "research_policy": discovery.context.audit_policy(),
+                                    "analysis_complete": False, "status": "RUNNING"})
+        discovery.context.budget.checkpoint = checkpoint
+        try:
+            checkpoint(discovery.context.budget.snapshot())
+            result = discovery.discover(task)
+        except Exception as exc:
+            # Even an unexpected orchestrator failure cannot expose provider secrets.
+            result = {"phase": "competitor_discovery", "status": "FAILED", "selected": list(task.competitors),
+                      "task": task.model_dump(),
+                      "issues": [{"code": "DISCOVERY_EXCEPTION", "type": type(exc).__name__}],
+                      "budget": discovery.context.budget.snapshot(), "analysis_complete": False}
+            result["research_policy"] = discovery.context.audit_policy()
+        finally:
+            discovery.context.budget.checkpoint = None
+        result["run_id"] = run_id
+        complete = result["status"] == "READY"
+        failed = result["status"] == "FAILED"
+        with persistence.transaction() as session:
+            persistence.tool_calls.finish(session, call_id, status="FAILED" if failed else "SUCCEEDED",
+                                          output_summary=result)
+            persistence.stage_events.finish(session, stage_id, status="FAILED" if failed else "SUCCEEDED")
+            persistence.agent_runs.finish(
+                session, run_id, status="COMPLETED" if complete else "FAILED" if failed else "PARTIAL_SUCCESS",
+                current_state="FAILED" if failed else "COMPLETED",
+                error_code=None if complete else "DISCOVERY_" + result["status"],
+                error_message=None if complete else "Discovery is incomplete; inspect tool audit. No analysis report was generated.")
+        return result
+
     def __init__(
         self,
         persistence: Persistence,

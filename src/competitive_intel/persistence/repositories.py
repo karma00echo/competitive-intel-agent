@@ -1114,6 +1114,12 @@ class StageEventRepository:
 
 
 class ToolCallRepository:
+    def checkpoint(self, session: Session, call_id: int, output_summary: Any) -> None:
+        """Persist a task budget before external work without finishing the tool."""
+        session.execute(text("UPDATE tool_calls SET output_summary = :summary "
+                             "WHERE id = :id AND status = 'RUNNING'"),
+                        {"id": call_id, "summary": _json(output_summary)})
+
     def create(
         self,
         session: Session,

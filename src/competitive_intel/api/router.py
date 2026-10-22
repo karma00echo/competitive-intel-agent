@@ -73,6 +73,16 @@ def _sanitize(value: Any, *, depth: int = 0) -> Any:
 
 def _run_summary_from_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     for call in reversed(calls):
+        if call["tool_name"] == "discover_competitors":
+            payload = decode_json(call.get("output_summary"))
+            if isinstance(payload, dict):
+                return {"search_provider": "unknown", "fetch_mode": "unknown",
+                        "agent_provider": "controlled", "fact_provider": "not_run",
+                        **payload.get("providers", {}), "execution_phase": "competitor_discovery",
+                        "analysis_complete": False,
+                        "warnings": ["Discovery only; no comparative analysis or report was generated."],
+                        "discovery_status": payload.get("status"),
+                        "selected_competitors": payload.get("selected", [])}
         if call["tool_name"] == "finalize_run_summary":
             payload = decode_json(call.get("output_summary"))
             if isinstance(payload, dict):
@@ -123,6 +133,10 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
     errors = summary.get("errors", [])
     report_summary = decode_json(run.get("report_summary")) or {}
     return {
+        **({"execution_phase": "competitor_discovery", "analysis_complete": False,
+            "discovery_status": summary.get("discovery_status"),
+            "selected_competitors": summary.get("selected_competitors", [])}
+           if summary.get("execution_phase") == "competitor_discovery" else {}),
         "run_id": int(run["id"]),
         "competitor": run.get("competitor_name") or run["input_name"],
         "competitor_id": run.get("competitor_id"),
