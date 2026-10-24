@@ -15,6 +15,7 @@ from competitive_intel.api.router import router as api_router
 from competitive_intel.api.intelligence import router as intelligence_router
 from competitive_intel.api.task_understanding import router as task_understanding_router
 from competitive_intel.api.competitor_discovery import router as competitor_discovery_router
+from competitive_intel.api.analysis_workflow import router as analysis_workflow_router
 from competitive_intel.config import Settings
 from competitive_intel.persistence import Database, Persistence
 
@@ -101,6 +102,7 @@ def create_app(
     app.include_router(intelligence_router)
     app.include_router(task_understanding_router)
     app.include_router(competitor_discovery_router)
+    app.include_router(analysis_workflow_router)
     app.mount("/static", StaticFiles(directory=str(WEB_ROOT / "static")), name="static")
 
     @app.get("/workspace")

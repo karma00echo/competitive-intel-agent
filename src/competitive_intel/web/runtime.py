@@ -175,3 +175,34 @@ class AnalysisTaskManager:
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=False)
+
+    def start_workflow(self, text, workflow):
+        """Share the existing executor/capacity with legacy single-product tasks."""
+        from hashlib import sha256
+        key = "workflow:" + sha256(text.strip().casefold().encode()).hexdigest()
+        with self._lock:
+            if key in self._active:
+                raise AnalysisAlreadyRunning(key)
+            if len(self._active) >= self._max_workers:
+                raise AnalysisCapacityReached("Global analysis capacity reached")
+            handles = workflow.prepare(text)
+            self._active.add(key)
+        def execute():
+            try:
+                workflow.execute(text, handles)
+            finally:
+                with self._lock:
+                    self._active.discard(key)
+        try:
+            self._executor.submit(execute)
+        except Exception:
+            with self._lock:
+                self._active.discard(key)
+            with self._persistence.transaction() as tx:
+                self._persistence.agent_runs.finish(tx, handles[0], status="FAILED", current_state="FAILED", error_code="SCHEDULE_FAILED")
+                self._persistence.stage_events.finish(tx, handles[1], status="FAILED")
+                self._persistence.tool_calls.finish(tx, handles[2], status="FAILED", output_summary={
+                    "run_id": handles[0], "status": "FAILED", "phase": "scheduling", "report_id": None,
+                    "analysis_complete": False, "issues": ["SCHEDULE_FAILED"], "budget": workflow.context.budget.snapshot()})
+            raise
+        return handles[0]

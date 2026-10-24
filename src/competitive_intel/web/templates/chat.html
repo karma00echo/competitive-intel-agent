@@ -18,11 +18,12 @@
 </section>
 <form id="chat-form" class="chat-composer">
   <label for="chat-input">Product name or analysis request</label>
-  <textarea id="chat-input" maxlength="250" rows="3" required placeholder="输入竞品名称，或试试：帮我分析 Notion 这个产品。"></textarea>
-  <div class="chat-composer-bottom"><span>受控命令 · 无自由多轮推理 · Ctrl / ⌘ + Enter</span><button type="submit" id="chat-send" aria-label="发送消息">{{ icon('arrow') }}</button></div>
+  <textarea id="chat-input" maxlength="1000" rows="3" required placeholder="比较豆包和 Kimi 的核心功能与定价策略，并生成竞品分析报告。"></textarea>
+  <label for="chat-mode">任务类型</label><select id="chat-mode"><option value="workflow">自然语言竞品分析</option><option value="legacy">已有记录查询 / 单产品快捷命令</option></select>
+  <div class="chat-composer-bottom"><span>证据约束研究 · Ctrl / ⌘ + Enter</span><button type="submit" id="chat-send" aria-label="发送消息">{{ icon('arrow') }}</button></div>
 </form>
 <p id="chat-error" role="alert" hidden></p>
-<p class="chat-limit">支持分析、变化、价格、来源和报告查询。可选择真实搜索与 LLM 证据提取（需服务端配置，会产生 API 费用），或跳过提取。跨竞品自然语言比较暂不支持；Fixture 仅供演示。</p>
+<p class="chat-limit">自然语言分析使用真实搜索、网页和模型，需要服务端启用及逐次费用确认。未配置或未迁移时会明确阻止运行。快捷命令保留已有记录查询；Fixture 仅供演示，不代表真实验收。每条请求独立，不自动理解跨消息指代。</p>
 <section id="chat-shortcuts" class="ed-entry-grid" aria-label="Quick tasks">
 {% for prompt, symbol, title, description in [('分析 ', 'competitors', 'Track Competitors', '建立竞品档案 · 输入产品名后确认启动'), ('最近有哪些变化', 'search', 'Review Signals', '查看已有产品、功能和定价变化'), ('查看 ', 'analyst', 'Analyze Competitors', '查询已有价格、来源与报告 · 暂不支持跨竞品推理')] %}
 <button type="button" class="ed-entry" data-prompt="{{ prompt }}"><span class="ed-entry-icon">{{ icon(symbol) }}</span><h2>{{ title }}</h2><p>{{ description }}</p></button>

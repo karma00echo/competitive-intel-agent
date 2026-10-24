@@ -59,6 +59,11 @@ PERSISTED_STATE = {
 
 class AgentRunner:
     @classmethod
+    def workflow(cls, persistence, context):
+        from .analysis_workflow import AnalysisWorkflow
+        return AnalysisWorkflow(persistence, context)
+
+    @classmethod
     def compare_products(cls, persistence, task, products, context):
         """Controlled handoff of researched products; context is task-scoped and server-owned."""
         from .competitive_report_service import CompetitiveReportService
@@ -82,7 +87,10 @@ class AgentRunner:
             call_id = persistence.tool_calls.create(
                 session, run_id=run_id, stage_event_id=stage_id, call_index=1,
                 tool_name=tool.name, input_summary={"task": task.model_dump()})
+        previous_checkpoint = discovery.context.budget.checkpoint
         def checkpoint(budget):
+            if previous_checkpoint:
+                previous_checkpoint(budget)
             with persistence.transaction() as session:
                 persistence.tool_calls.checkpoint(session, call_id,
                     output_summary={"phase": "competitor_discovery", "budget": budget,
@@ -100,7 +108,7 @@ class AgentRunner:
                       "budget": discovery.context.budget.snapshot(), "analysis_complete": False}
             result["research_policy"] = discovery.context.audit_policy()
         finally:
-            discovery.context.budget.checkpoint = None
+            discovery.context.budget.checkpoint = previous_checkpoint
         result["run_id"] = run_id
         complete = result["status"] == "READY"
         failed = result["status"] == "FAILED"

@@ -73,6 +73,13 @@ def _sanitize(value: Any, *, depth: int = 0) -> Any:
 
 def _run_summary_from_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     for call in reversed(calls):
+        if call["tool_name"] == "run_competitive_workflow":
+            payload = decode_json(call.get("output_summary"))
+            if isinstance(payload, dict):
+                return {**payload, "execution_phase": "competitive_workflow",
+                        "search_provider": "serper", "fetch_mode": "real",
+                        "agent_provider": "controlled_workflow", "fact_provider": "openai_compatible",
+                        "warnings": payload.get("issues", [])}
         if call["tool_name"] == "discover_competitors":
             payload = decode_json(call.get("output_summary"))
             if isinstance(payload, dict):
@@ -161,7 +168,7 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
         "error_count": len(errors) + (1 if run.get("error_message") else 0),
         "warnings": _sanitize(warnings),
         "errors": _sanitize(errors or ([run["error_message"]] if run.get("error_message") else [])),
-        "report_id": run.get("report_id"),
+        "report_id": run.get("report_id") or summary.get("report_id"),
         "change_summary": summary.get(
             "change_summary", report_summary.get("change_summary", {})
         ),

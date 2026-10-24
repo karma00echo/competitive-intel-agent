@@ -10,7 +10,8 @@ def test_chat_routes_and_replay_are_read_only(persistence):
     with TestClient(create_app(settings=_settings(), persistence=persistence)) as client:
         for route in ['/', '/analyst', '/?conversation=missing', '/?run=99999']:
             soup = BeautifulSoup(client.get(route).text, 'html.parser')
-            assert soup.select_one('textarea#chat-input')['maxlength'] == '250'
+            assert soup.select_one('textarea#chat-input')['maxlength'] == '1000'
+            assert soup.select_one('#chat-mode option')['value'] == 'workflow'
             assert soup.select_one('#chat-conversation').has_attr('hidden')
             assert len(soup.select('[data-prompt]')) == 3
             assert not soup.select('#product-content')

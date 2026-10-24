@@ -74,7 +74,7 @@ class ResearchContext:
         return LLMFactExtractionProvider(replace(self.settings.llm, max_calls=10, max_retries=0),
                                          session=self.session("extraction"))
 
-    def research_services(self, persistence):
+    def research_services(self, persistence, *, source_limits=None):
         """Handoff for later research: all three reuse this ledger across products.
 
         Does not start research or historical baseline publication.
@@ -83,7 +83,7 @@ class ResearchContext:
         from .snapshot_service import SnapshotService
         from .fact_extraction_service import FactExtractionService
         search, fetcher = self.search_provider(), self.page_fetcher()
-        return (SourceDiscoveryService(persistence, search, fetcher),
+        return (SourceDiscoveryService(persistence, search, fetcher, limits=source_limits),
                 SnapshotService(persistence, fetcher), FactExtractionService(persistence, self.fact_provider()))
 
     def close(self):

@@ -76,6 +76,10 @@ TOOL_DEFINITIONS = {
         _object_schema({"task": {"type": "object"}}, ("task",)),
         frozenset(),
     ),
+    "run_competitive_workflow": ToolDefinition(
+        "run_competitive_workflow", "Run bounded natural-language competitive research and reporting.",
+        _object_schema({"text": {"type": "string"}}, ("text",)), frozenset(),
+    ),
     "get_competitor_profile": ToolDefinition(
         "get_competitor_profile",
         "Read persisted competitor profile completeness.",

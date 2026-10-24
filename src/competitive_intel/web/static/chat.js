@@ -37,6 +37,35 @@
     if(data.report) actions.append(link('查看报告',`/reports/${data.report.report_id}`));
     box.append(actions);
   }
+  async function watchWorkflow(box,record,epoch){
+    if(epoch!==revision||!box.isConnected)return;
+    try{
+      const data=await api(`/api/analyst/workflows/${record.runId}`);
+      if(epoch!==revision)return;
+      box.replaceChildren(node('h2','Agent · 竞品分析'),node('p',`#${record.runId} · ${data.phase} · ${data.status} · ${data.elapsed_seconds||0}s`));
+      box.append(node('p','真实业务工作流；结果是否完整以证据和最终状态为准。'),link('运行审计',`/developer/runs/${record.runId}`));
+      if(data.task)box.append(node('pre',JSON.stringify(data.task,null,2)));
+      if(data.discovery)box.append(node('p',`候选选择：${(data.discovery.selected||[]).join('、')} · ${data.discovery.status}`));
+      for(const product of data.products||[])box.append(node('p',`${product.name} · ${product.status} · ${product.research.fact_count} 条事实 · ${(product.issues||[]).join(' / ')}`));
+      box.append(node('pre',JSON.stringify({budget:data.budget,issues:data.issues},null,2)));
+      if(data.status==='RUNNING'){schedule(()=>watchWorkflow(box,record,epoch));return;}
+      if(data.report_id){
+        const report=await api(`/api/reports/${data.report_id}`);if(epoch!==revision)return;
+        box.append(node('h3',`${report.report_type} · ${data.analysis_complete?'已完成所选范围':'部分结果，请核对信息缺口'}`));
+        const content=report.content_json, matrix=content.matrix;
+        const table=node('table'),head=node('tr');['产品','维度','状态','事实'].forEach(v=>head.append(node('th',v)));table.append(head);
+        for(const product of matrix.products)for(const [dimension,cell] of Object.entries(product.cells)){
+          const tr=node('tr');[product.name,dimension,cell.status,cell.fact_ids.map(id=>JSON.stringify(matrix.facts[id].value)).join('；')].forEach(v=>tr.append(node('td',v)));table.append(tr);
+        }box.append(table,node('h3','综合结论 · 分析推断'));
+        for(const finding of content.conclusions)box.append(node('p',finding.text),node('small',finding.evidence_ids.join(', ')));
+        if(!content.conclusions.length)box.append(node('p','无法形成受证据支持的综合结论。'));
+        const details=node('details');details.append(node('summary','来源引用与信息缺口'));
+        for(const [id,evidence] of Object.entries(matrix.evidence))details.append(node('p',`${id} · ${evidence.quote}`),link(evidence.url,evidence.url));
+        details.append(node('pre',JSON.stringify({gaps:matrix.gaps,limitations:content.limitations},null,2)));box.append(details);
+        box.append(link('查看正式报告记录',`/reports/${data.report_id}`),link('导出 Markdown',`/api/reports/${data.report_id}/download`));
+      }else box.append(node('p','本次没有生成报告。澄清或缺失证据不能视为分析成功。'));
+    }catch(error){if(epoch===revision)box.append(node('p',`读取失败：${error.message}。可从 History 重新查看，不会重启任务。`));}
+  }
   function renderRun(box,data,record) {
     const expanded=box.querySelector('details')?.open || false;
     const run=data.run, state=run.final_state||run.current_state;
@@ -69,6 +98,8 @@
   }
   async function watchRun(box,record,epoch,attempt=0) {
     if(epoch!==revision||!box.isConnected) return;
+    if(!record.workflowChecked){record.workflowChecked=true;try{await api(`/api/analyst/workflows/${record.runId}`);record.workflow=true;}catch{/* Legacy run. */}}
+    if(record.workflow)return watchWorkflow(box,record,epoch);
     try {
       const data=await api(`/api/workspace/runs/${record.runId}`);
       if(epoch!==revision||!box.isConnected) return;
@@ -106,6 +137,22 @@
     };
   }
   async function answer(box,record,epoch) {
+    if(record.workflow){
+      if(record.runId)return watchWorkflow(box,record,epoch);
+      if(record.started||record.error){box.append(node('p',record.error||'启动响应未保存，请先检查 History；不会自动重发。'),link('History','/history'));return;}
+      try{
+        const ready=await api('/api/analyst/workflows/readiness');
+        if(epoch!==revision)return;
+        if(!ready.ready){box.append(node('p',`尚不能启动：${ready.blockers.join(' · ')}。正式迁移和付费测试需单独批准。`));return;}
+        box.append(node('p',`将使用真实外部服务。共享上限：${ready.limits.searches} 次搜索、${ready.limits.fetches} 次网页请求、${ready.limits.models} 次模型调用、${ready.limits.tokens} 预留 Token、$${ready.limits.cost_microusd/1000000} 预留费用。预留值不是实际账单。`));
+        const button=node('button','确认费用上限并开始真实分析');button.type='button';box.append(button);
+        button.onclick=async()=>{button.disabled=true;record.started=true;persist();try{
+          const accepted=await api('/api/analyst/workflows',{method:'POST',body:JSON.stringify({text:record.text,allow_paid:true})});
+          record.runId=accepted.run_id;persist();if(epoch===revision)watchWorkflow(box,record,epoch);
+        }catch(error){record.error=`启动未确认：${error.message}。请先检查 History 后再提交。`;persist();box.append(node('p',record.error));}};
+      }catch(error){box.append(node('p',`准备检查失败：${error.message}`));}
+      return;
+    }
     if(record.runId) return watchRun(box,record,epoch);
     if(record.error){box.append(node('p',record.error),link('查看 History','/history'));return;}
     if(record.started){box.append(node('p','上次启动的响应未保存。请先在 History 核对运行；刷新不会重新提交。'),link('查看 History','/history'));return;}
@@ -160,11 +207,11 @@
     event.preventDefault();const text=$('chat-input').value.trim();if(!text||sending)return;
     if(current?.messages.length>=60){message('agent','本段对话已达到 60 条请求上限，请新建分析。');return;}
     sending=true;$('chat-send').disabled=true;ensureConversation(text);showConversation();
-    const record={text};current.messages.push(record);persist();$('chat-input').value='';message('user',text);const box=message('agent');
+    const record={text,workflow:$('chat-mode').value==='workflow'};current.messages.push(record);persist();$('chat-input').value='';message('user',text);const box=message('agent');
     const epoch=revision;await answer(box,record,epoch);if(epoch===revision){sending=false;$('chat-send').disabled=false;$('chat-input').focus();}
   };
   $('chat-input').onkeydown=event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();$('chat-form').requestSubmit();}};
-  document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{$('chat-input').value=button.dataset.prompt;$('chat-input').focus();});
+  document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{$('chat-mode').value='legacy';$('chat-input').value=button.dataset.prompt;$('chat-input').focus();});
   window.addEventListener('popstate',restore);
   window.addEventListener('pagehide',stopPolling);
   window.addEventListener('pageshow',event=>{if(event.persisted)restore();});

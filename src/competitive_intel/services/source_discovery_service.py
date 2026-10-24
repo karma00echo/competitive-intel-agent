@@ -56,6 +56,8 @@ class SourceDiscoveryService:
         aliases: tuple[str, ...] = (),
         locale: str = "en-US",
         language: str | None = None,
+        search_intents: tuple[SearchIntent, ...] | None = None,
+        expected_domain: str | None = None,
     ) -> SourceDiscoveryResult:
         identity = normalize_competitor_name(competitor_name, aliases)
         lang = language or (
@@ -68,12 +70,12 @@ class SourceDiscoveryService:
                     identity, intent, language=lang, max_queries=1
                 )[0],
             )
-            for intent in (
+            for intent in (search_intents or (
                 SearchIntent.OFFICIAL_SITE,
                 SearchIntent.FEATURES,
                 SearchIntent.PRICING,
                 SearchIntent.CHANGELOG,
-            )
+            ))
         )
         queries = tuple(query for _, query in search_plan)
         errors: list[str] = []
@@ -153,6 +155,9 @@ class SourceDiscoveryService:
             identity, tuple(candidates_by_url.values()), tuple(validations), page_cache
         )
         selected_domain, decision_reason = select_official_domain(domain_evidence)
+        if expected_domain and selected_domain != expected_domain:
+            selected_domain = None
+            decision_reason = "Discovery/research identity mismatch; no profile or sources updated."
         official = None
         if selected_domain:
             matching = [
