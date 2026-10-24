@@ -48,6 +48,8 @@ class SourceDiscoveryService:
         self._search = search_provider
         self._fetcher = page_fetcher
         self._limits = limits or SourceDiscoveryLimits()
+        self.fetch_audit = []
+        self.search_audit = []
 
     def discover(
         self,
@@ -60,6 +62,8 @@ class SourceDiscoveryService:
         expected_domain: str | None = None,
     ) -> SourceDiscoveryResult:
         identity = normalize_competitor_name(competitor_name, aliases)
+        self.fetch_audit = []
+        self.search_audit = []
         lang = language or (
             "zh" if any("\u4e00" <= c <= "\u9fff" for c in competitor_name) else "en"
         )
@@ -96,6 +100,9 @@ class SourceDiscoveryService:
                     self._limits.max_results_per_query,
                 ),
             )
+            self.search_audit.append({"query": query, "locale": locale, "language": lang,
+                                      "ok": response.ok, "result_count": len(response.results),
+                                      "error_code": response.error_code})
             if not response.ok:
                 errors.append(f"{response.error_code}: {response.error_message}")
                 continue
@@ -209,6 +216,7 @@ class SourceDiscoveryService:
                     max_pages=self._limits.max_pages,
                     max_internal_links=self._limits.max_internal_links,
                     max_supplemental_searches=self._limits.max_supplemental_searches,
+                    existing_results=tuple(candidates_by_url.values()),
                 )
                 validated_discoveries = []
                 for discovery in discoveries:
@@ -271,12 +279,17 @@ class SourceDiscoveryService:
 
     def _fetch_evidence(self, url: str) -> PageEvidence | None:
         fetched = self._fetcher.fetch(FetchPageRequest(url))
+        audit = {"url": url, "final_url": fetched.final_url, "http_status": fetched.http_status,
+                 "fetch_status": fetched.fetch_status.value, "error_code": fetched.error_code}
+        self.fetch_audit.append(audit)
         if fetched.fetch_status != FetchStatus.SUCCESS or not fetched.raw_html:
             return PageEvidence(
                 fetched.final_url or url, fetched.page_title, "", fetched.raw_html or "",
                 fetched.fetch_status,
             )
         cleaned = clean_page(CleanPageRequest(fetched.raw_html, fetched.final_url or url))
+        audit.update(clean_status=cleaned.clean_status.value, content_length=cleaned.content_length,
+                     page_title=cleaned.page_title)
         return PageEvidence(
             fetched.final_url or url,
             cleaned.page_title or fetched.page_title,

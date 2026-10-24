@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from competitive_intel.infrastructure.search.base import SearchProvider
 
 from .query_generator import generate_search_queries
-from .search import SearchIntent, SearchRequest
+from .search import SearchIntent, SearchRequest, SearchResult
 from .sources import (
     CompetitorIdentity, DiscoveredSource, DiscoveryStatus, SourceType,
 )
@@ -40,6 +40,7 @@ def discover_sources(
     max_pages: int = 8,
     max_internal_links: int = 100,
     max_supplemental_searches: int = 3,
+    existing_results: tuple[SearchResult, ...] = (),
 ) -> tuple[DiscoveredSource, ...]:
     if not homepage_html.strip():
         return tuple(
@@ -60,6 +61,24 @@ def discover_sources(
             continue
         haystack = f"{anchor.get_text(' ', strip=True)} {url}".casefold()
         for source_type, keywords in KEYWORDS.items():
+            matches = {word for word in keywords if word in haystack}
+            if matches:
+                scored[source_type][url].update(matches)
+
+    # Reuse searches already paid for during official-domain discovery. These
+    # remain candidates requiring page validation, never confirmed evidence.
+    navigation_types = set(scored)
+    for result in existing_results:
+        try:
+            url = normalize_url(result.url)
+        except ValueError:
+            continue
+        if not same_site(url, verified_homepage) or url == normalize_url(verified_homepage):
+            continue
+        haystack = f"{result.title} {result.snippet} {url}".casefold()
+        for source_type, keywords in KEYWORDS.items():
+            if source_type in navigation_types:
+                continue
             matches = {word for word in keywords if word in haystack}
             if matches:
                 scored[source_type][url].update(matches)

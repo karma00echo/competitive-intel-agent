@@ -131,6 +131,9 @@ class AnalysisWorkflow:
                 search_intents=(SearchIntent.OFFICIAL_SITE, SearchIntent.FEATURES, SearchIntent.PRICING))
             audit.update(queries=list(discovered.queries), official_domain=discovered.official_domain,
                          source_ids=list(discovered.saved_source_ids))
+            audit["discovery"] = asdict(discovered)
+            audit["search_requests"] = sources.search_audit
+            audit["validation_fetches"] = sources.fetch_audit
             if discovered.errors:
                 audit["issues"].append("SOURCE_DISCOVERY_PARTIAL")
             if not discovered.official_domain or not discovered.saved_source_ids:
@@ -154,6 +157,11 @@ class AnalysisWorkflow:
                     if not snapshot:
                         audit["issues"].append("PAGE_FETCH_FAILED")
                 extracted = facts.extract(name, run_id=run_id, current_run_only=True)
+                audit["extraction"] = {"candidate_count": extracted.candidate_count,
+                    "provider_calls": list(extracted.provider_calls),
+                    "warnings": list(extracted.warnings), "errors": list(extracted.errors),
+                    "rejected": [{"status": item.status.value, "reason": item.reason}
+                                 for item in extracted.rejected]}
                 audit["fact_count"] = len(extracted.saved)
                 if extracted.errors or any(item.status.value != "DUPLICATE" for item in extracted.rejected):
                     audit["issues"].append("FACT_EXTRACTION_PARTIAL")

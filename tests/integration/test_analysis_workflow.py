@@ -91,6 +91,16 @@ def test_full_workflow_uses_real_adapters_and_preserves_partial_evidence(persist
                 assert not persistence.fact_versions.list_current(tx, product["product_id"])
                 assert not persistence.changes.list_for_run(tx, product["run_id"])
     assert any(call[0] == "get" for call in transport.calls)
+    for product in result['products']:
+        audit = product['research']
+        assert audit['discovery']['candidates']
+        assert audit['discovery']['validations']
+        assert len(audit['search_requests']) == 3
+        assert audit['validation_fetches']
+        assert audit['extraction']['provider_calls']
+    with persistence.transaction() as tx:
+        persisted = json.loads(persistence.tool_calls.list_for_run(tx, handles[0])[0]['output_summary'])
+    assert persisted['products'][0]['research']['extraction']['provider_calls']
 
 
 @pytest.mark.parametrize("mode", ["clarify", "model_failure", "budget"])
@@ -101,6 +111,9 @@ def test_clarification_failures_and_budget_do_not_fake_success(persistence, mode
     result = flow.execute(text, flow.prepare(text))
     assert not result["analysis_complete"]
     assert result["status"] != "COMPLETE"
+    if mode == 'model_failure':
+        audit = result['products'][0]['research']['extraction']
+        assert audit['errors'] and audit['provider_calls'][0]['error_code']
     if mode in {"clarify", "budget"}:
         assert result["report_id"] is None
 
