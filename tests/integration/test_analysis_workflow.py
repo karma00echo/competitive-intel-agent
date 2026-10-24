@@ -1,5 +1,6 @@
 """Real production adapters with injected synthetic HTTP; not real E2E acceptance."""
 import json
+import subprocess
 import time
 import pytest
 import requests
@@ -115,7 +116,13 @@ def test_formal_api_paid_gate_start_poll_read_export(persistence, monkeypatch):
         for name in ["RESEARCH_SEARCH_COST_MICROUSD", "RESEARCH_INPUT_COST_MICROUSD_PER_MILLION", "RESEARCH_OUTPUT_COST_MICROUSD_PER_MILLION"]:
             monkeypatch.setenv(name, "1000")
         assert client.get('/api/analyst/workflows/readiness').json()["data"]["ready"]
-        accepted = client.post('/api/analyst/workflows', json={"text": "Compare Atlas and Birch", "allow_paid": True})
+        # Replay the exact request captured from the shipped chat JS, not a
+        # TestClient json= shortcut that silently supplies the missing header.
+        wire = json.loads(subprocess.run(['node', 'tests/chat_workflow_submission.cjs', 'success', 'Compare Atlas and Birch'],
+                         capture_output=True, text=True, encoding='utf-8', check=True).stdout)
+        post = next(row for row in wire['requests'] if row['method'] == 'POST')
+        accepted = client.post(post['url'], content=post['body'].encode(),
+                               headers={'Content-Type': post['contentType']})
         assert accepted.status_code == 202, accepted.text
         rid = accepted.json()["data"]["run_id"]
         for _ in range(200):

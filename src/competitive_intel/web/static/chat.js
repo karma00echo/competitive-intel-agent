@@ -146,8 +146,8 @@
         if(!ready.ready){box.append(node('p',`尚不能启动：${ready.blockers.join(' · ')}。正式迁移和付费测试需单独批准。`));return;}
         box.append(node('p',`将使用真实外部服务。共享上限：${ready.limits.searches} 次搜索、${ready.limits.fetches} 次网页请求、${ready.limits.models} 次模型调用、${ready.limits.tokens} 预留 Token、$${ready.limits.cost_microusd/1000000} 预留费用。预留值不是实际账单。`));
         const button=node('button','确认费用上限并开始真实分析');button.type='button';box.append(button);
-        button.onclick=async()=>{button.disabled=true;record.started=true;persist();try{
-          const accepted=await api('/api/analyst/workflows',{method:'POST',body:JSON.stringify({text:record.text,allow_paid:true})});
+        button.onclick=async()=>{if(epoch!==revision||record.started)return;button.disabled=true;record.started=true;persist();try{
+          const accepted=await api('/api/analyst/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:record.text,allow_paid:true})});
           record.runId=accepted.run_id;persist();if(epoch===revision)watchWorkflow(box,record,epoch);
         }catch(error){record.error=`启动未确认：${error.message}。请先检查 History 后再提交。`;persist();box.append(node('p',record.error));}};
       }catch(error){box.append(node('p',`准备检查失败：${error.message}`));}
