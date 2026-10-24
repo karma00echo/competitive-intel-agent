@@ -70,6 +70,12 @@ TOOL_DEFINITIONS = {
         _object_schema({"task": {"type": "object"}}, ("task",)),
         frozenset(),  # Only the controlled discovery branch, never legacy history runs.
     ),
+    "compare_products": ToolDefinition(
+        "compare_products",
+        "Compare verified product observations and publish a competitive report; never historical changes.",
+        _object_schema({"task": {"type": "object"}}, ("task",)),
+        frozenset(),
+    ),
     "get_competitor_profile": ToolDefinition(
         "get_competitor_profile",
         "Read persisted competitor profile completeness.",

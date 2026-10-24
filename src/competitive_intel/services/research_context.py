@@ -66,6 +66,10 @@ class ResearchContext:
     def candidate_evaluator(self):
         return CandidateEvaluator(self.settings.llm, self.session("evaluation"))
 
+    def synthesis_provider(self):
+        from competitive_intel.infrastructure.agent.competitive_synthesis import CompetitiveSynthesisProvider
+        return CompetitiveSynthesisProvider(self.settings.llm, self.session("synthesis"))
+
     def fact_provider(self):
         return LLMFactExtractionProvider(replace(self.settings.llm, max_calls=10, max_retries=0),
                                          session=self.session("extraction"))

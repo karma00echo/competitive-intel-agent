@@ -144,7 +144,7 @@ class CompetitorReportService:
             if report_id is not None:
                 record = self._persistence.reports.get(session, report_id)
             elif run_id is not None:
-                for report_type in ("CHANGE_TRACKING", "BASELINE", "PARTIAL_EVIDENCE"):
+                for report_type in ("CHANGE_TRACKING", "BASELINE", "PARTIAL_EVIDENCE", "COMPETITIVE_ANALYSIS", "COMPETITIVE_ANALYSIS_PARTIAL"):
                     record = self._persistence.reports.get_for_run(
                         session, run_id, report_type
                     )

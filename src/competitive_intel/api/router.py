@@ -83,6 +83,13 @@ def _run_summary_from_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
                         "warnings": ["Discovery only; no comparative analysis or report was generated."],
                         "discovery_status": payload.get("status"),
                         "selected_competitors": payload.get("selected", [])}
+        if call["tool_name"] == "compare_products":
+            payload = decode_json(call.get("output_summary"))
+            if isinstance(payload, dict):
+                return {**payload, "execution_phase": "competitive_analysis",
+                        "search_provider": "upstream_research", "fetch_mode": "upstream_research",
+                        "agent_provider": "controlled_comparison", "fact_provider": "persisted_verified_observations",
+                        "warnings": payload.get("issues", [])}
         if call["tool_name"] == "finalize_run_summary":
             payload = decode_json(call.get("output_summary"))
             if isinstance(payload, dict):
@@ -137,6 +144,8 @@ def _run_view(run: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, Any
             "discovery_status": summary.get("discovery_status"),
             "selected_competitors": summary.get("selected_competitors", [])}
            if summary.get("execution_phase") == "competitor_discovery" else {}),
+        **({"execution_phase": "competitive_analysis", "analysis_complete": summary.get("analysis_complete", False)}
+           if summary.get("execution_phase") == "competitive_analysis" else {}),
         "run_id": int(run["id"]),
         "competitor": run.get("competitor_name") or run["input_name"],
         "competitor_id": run.get("competitor_id"),
@@ -446,8 +455,10 @@ def report_detail(request: Request, report_id: int) -> APIEnvelope:
         "report_id": report.report_id, "report_type": report.report_type,
         "title": report.title, "executive_summary": report.executive_summary,
         "change_summary": report.change_summary,
-        "content_json": _sanitize(report.content_json),
-        "content_markdown": report.content_markdown[:200_000],
+        "content_json": (report.content_json if report.report_type in {
+            "COMPETITIVE_ANALYSIS", "COMPETITIVE_ANALYSIS_PARTIAL"} else _sanitize(report.content_json)),
+        "content_markdown": (report.content_markdown if report.report_type in {
+            "COMPETITIVE_ANALYSIS", "COMPETITIVE_ANALYSIS_PARTIAL"} else report.content_markdown[:200_000]),
         "created_at": record["generated_at"] if record else None,
     })
 

@@ -702,6 +702,25 @@ class ChangeRepository:
 
 
 class ReportRepository:
+    def require_competitive_schema(self, session: Session) -> None:
+        row = _one(session, """SELECT COLUMN_TYPE AS definition FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reports' AND COLUMN_NAME='report_type'""", {})
+        if not row or "'COMPETITIVE_ANALYSIS_PARTIAL'" not in row["definition"]:
+            raise ValueError("COMPETITIVE_REPORT_SCHEMA_REQUIRED")
+
+    def lock_target(self, session: Session, competitor_id: int) -> Record | None:
+        return _one(session, "SELECT * FROM competitors WHERE id=:id FOR UPDATE", {"id": competitor_id})
+
+    def get_comparison_task(self, session: Session, task_id: str) -> Record | None:
+        return _one(session, """SELECT * FROM tool_calls WHERE tool_name='compare_products'
+            AND JSON_UNQUOTE(JSON_EXTRACT(input_summary,'$.task_id'))=:task_id
+            ORDER BY id LIMIT 1""", {"task_id": task_id})
+
+    def get_discovery_task(self, session: Session, task_id: str) -> Record | None:
+        return _one(session, """SELECT * FROM tool_calls WHERE tool_name='discover_competitors'
+            AND JSON_UNQUOTE(JSON_EXTRACT(output_summary,'$.budget.task_id'))=:task_id
+            ORDER BY id LIMIT 1""", {"task_id": task_id})
+
     def create(
         self,
         session: Session,
@@ -932,6 +951,28 @@ class FactVersionRepository:
 
 
 class FactObservationRepository:
+    def list_for_matrix(self, session: Session, run_id: int) -> list[Record]:
+        """All observed provenance, including invalid links for fail-closed checks."""
+        return _all(session, """
+            SELECT pf.*, fo.id AS observation_id, fo.competitor_id AS observation_product_id,
+                   fo.run_id AS observed_run_id, fo.source_id, fo.snapshot_id AS observed_snapshot_id,
+                   fo.evidence_text AS observed_evidence, fo.confidence AS observed_confidence,
+                   fo.observed_at, fv.normalized_value, fv.competitor_id AS version_product_id,
+                   src.competitor_id AS source_product_id, src.url AS observed_source_url,
+                   src.verification_status, src.is_active, osrc.competitor_id AS origin_source_product_id,
+                   snap.run_id AS snapshot_run_id, snap.source_id AS snapshot_source_id,
+                   snap.fetch_status, snap.requested_url, snap.final_url, snap.clean_content,
+                   snap.clean_hash, snap.fetched_at
+            FROM fact_observations fo
+            LEFT JOIN product_facts pf ON pf.id=fo.fact_id
+            LEFT JOIN fact_versions fv ON fv.fact_id=fo.fact_id
+            LEFT JOIN sources src ON src.id=fo.source_id
+            LEFT JOIN snapshots snap ON snap.id=fo.snapshot_id
+            LEFT JOIN snapshots origin ON origin.id=pf.snapshot_id
+            LEFT JOIN sources osrc ON osrc.id=origin.source_id
+            WHERE fo.run_id=:run_id ORDER BY fo.id
+        """, {"run_id": run_id})
+
     def get_cached_page(self, session: Session, cache_key: str) -> Record | None:
         """Versioned complete page result, not merely newly inserted observations."""
         rows = _all(session, """

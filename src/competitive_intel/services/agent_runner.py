@@ -59,6 +59,12 @@ PERSISTED_STATE = {
 
 class AgentRunner:
     @classmethod
+    def compare_products(cls, persistence, task, products, context):
+        """Controlled handoff of researched products; context is task-scoped and server-owned."""
+        from .competitive_report_service import CompetitiveReportService
+        return CompetitiveReportService(persistence).run(task, products, context)
+
+    @classmethod
     def discover_competitors(cls, persistence, task, discovery):
         """Stage 9.2.2 branch of the main runner, not a historical comparison run.
 

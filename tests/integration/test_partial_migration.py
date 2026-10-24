@@ -23,6 +23,7 @@ def test_old_database_upgrade_preserves_history_and_is_restart_safe(persistence,
             c.exec_driver_sql("ALTER TABLE agent_runs MODIFY status ENUM('RUNNING','COMPLETED','FAILED') NOT NULL DEFAULT 'RUNNING'")
             c.exec_driver_sql("ALTER TABLE reports MODIFY report_type ENUM('BASELINE','CHANGE_TRACKING') NOT NULL")
             c.exec_driver_sql("DELETE FROM schema_migrations WHERE version='003_partial_success.sql'")
+            c.exec_driver_sql("DELETE FROM schema_migrations WHERE version='004_competitive_reports.sql'")
         initialize_schema(mysql_engine)
         initialize_schema(mysql_engine)
         assert 'PARTIAL_SUCCESS' in enums(mysql_engine)['agent_runs']
@@ -32,6 +33,7 @@ def test_old_database_upgrade_preserves_history_and_is_restart_safe(persistence,
         # Simulate interrupted DDL: both ALTERs applied, migration marker not committed.
         with mysql_engine.begin() as c:
             c.exec_driver_sql("DELETE FROM schema_migrations WHERE version='003_partial_success.sql'")
+            c.exec_driver_sql("DELETE FROM schema_migrations WHERE version='004_competitive_reports.sql'")
         initialize_schema(mysql_engine)
     finally:
         initialize_schema(mysql_engine)
