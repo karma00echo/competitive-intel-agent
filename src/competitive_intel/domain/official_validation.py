@@ -103,9 +103,14 @@ def validate_official_source(
             continue
     if internal >= 2:
         support.append("multiple_internal_links")
-    if "copyright" in raw or "©" in page.raw_html:
-        if any(term and term in re.sub(r"\W", "", raw) for term in terms):
+    # A product mentioned anywhere in an article does not own the site's footer.
+    for text_node in soup.find_all(string=re.compile(r"copyright|©", re.I)):
+        if text_node.parent.name in {'script', 'style'}:
+            continue
+        notice = text_node.parent.get_text(' ', strip=True)
+        if len(notice) <= 240 and any(term and term in re.sub(r"\W", "", notice.casefold()) for term in terms):
             support.append("brand_copyright")
+            break
 
     rank_signal = max(0, 11 - min(candidate.rank, 10)) * 0.001
     score = min(0.98, 0.15 + 0.16 * len(set(support)) + rank_signal)
@@ -114,6 +119,11 @@ def validate_official_source(
         or "brand_copyright" in support
         or ("brand_in_page_title" in support and "same_domain_canonical" in support)
     )
+    editorial = any(part in {'news', 'blog', 'article', 'articles'}
+                    for part in urlsplit(normalized).path.casefold().split('/'))
+    if editorial and not {'brand_matches_domain', 'brand_copyright'}.intersection(support):
+        risk.append('editorial_page_without_brand_ownership')
+        strong = False
     status = VerificationStatus.VERIFIED if strong and score >= 0.63 else VerificationStatus.PENDING_CONFIRMATION
     reason = (
         "Multiple independent brand, domain, canonical, and site signals support official ownership."

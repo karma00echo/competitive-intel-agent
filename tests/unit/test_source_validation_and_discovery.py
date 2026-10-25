@@ -32,6 +32,42 @@ def _candidate(title: str, url: str, rank: int = 1) -> SearchResult:
     return SearchResult(title, url, "candidate", rank, "fixture", "query")
 
 
+def test_third_party_article_canonical_and_unrelated_copyright_are_not_ownership():
+    url = 'https://publisher.example/news/atlas-guide'
+    html = '<title>Atlas guide</title><link rel="canonical" href="'+url+'"><main>Atlas features</main><a href="/">Home</a><a href="/about">About</a><footer>Copyright Publisher Ltd</footer>'
+    page = PageEvidence(url, 'Atlas guide', 'Atlas features', html, FetchStatus.SUCCESS)
+    result = validate_official_source(normalize_competitor_name('Atlas'), _candidate('Atlas guide',url),page)
+    assert result.verification_status == VerificationStatus.PENDING_CONFIRMATION
+    assert 'brand_copyright' not in result.supporting_signals
+    assert 'editorial_page_without_brand_ownership' in result.risk_signals
+
+
+def test_owned_editorial_page_still_requires_and_accepts_brand_copyright():
+    url='https://publisher.example/blog/atlas'
+    html='<title>Atlas news</title><link rel="canonical" href="'+url+'"><main>Atlas features</main><footer>Copyright Atlas</footer>'
+    page=PageEvidence(url,'Atlas news','Atlas features',html,FetchStatus.SUCCESS)
+    result=validate_official_source(normalize_competitor_name('Atlas'),_candidate('Atlas',url),page)
+    assert result.verification_status == VerificationStatus.VERIFIED
+    assert 'brand_copyright' in result.supporting_signals
+
+
+def test_branded_about_page_precedes_short_root_without_verifying_it():
+    from competitive_intel.services.source_discovery_service import identity_candidate_key
+    identity=normalize_competitor_name('Atlas')
+    root=_candidate('Atlas','https://vendor.example/',1)
+    about=_candidate('Atlas official','https://vendor.example/en/about',3)
+    assert min([root,about],key=lambda c:identity_candidate_key(c,identity))==about
+    assert validate_official_source(identity,about).verification_status==VerificationStatus.PENDING_CONFIRMATION
+
+
+def test_unbranded_about_does_not_override_root():
+    from competitive_intel.services.source_discovery_service import identity_candidate_key
+    identity=normalize_competitor_name('Atlas')
+    root=_candidate('Atlas','https://vendor.example/',1)
+    about=_candidate('Other company','https://vendor.example/about',2)
+    assert min([root,about],key=lambda c:identity_candidate_key(c,identity))==root
+
+
 def test_official_homepage_is_verified_by_multiple_independent_signals() -> None:
     result = validate_official_source(
         normalize_competitor_name("Notion"),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from competitive_intel.domain.content_cleaner import clean_page
 from competitive_intel.domain.names import normalize_competitor_name
@@ -33,6 +34,19 @@ from competitive_intel.domain.webpage import (
 from competitive_intel.infrastructure.search.base import SearchProvider
 from competitive_intel.infrastructure.search.search_web import search_web
 from competitive_intel.persistence import Persistence
+
+
+def identity_candidate_key(candidate: SearchResult, identity):
+    """Prefer a brand-labelled about page over a root that may be an app shell.
+
+    This changes only which page gets fetched, never the ownership threshold.
+    """
+    url = normalize_url(candidate.url)
+    segments = urlsplit(url).path.strip('/').casefold().split('/')
+    about = segments[-1] in {'about', 'about-us', 'company'}
+    branded = any(name.casefold() in candidate.title.casefold()
+                  for name in (identity.original_name, identity.normalized_name, *identity.aliases) if name)
+    return (0 if about and branded else 1, len(url.split('/', 3)[-1]), candidate.rank, url)
 
 
 class SourceDiscoveryService:
@@ -130,11 +144,7 @@ class SourceDiscoveryService:
         representatives = [
             min(
                 items,
-                key=lambda item: (
-                    len(normalize_url(item.url).split("/", 3)[-1]),
-                    item.rank,
-                    normalize_url(item.url),
-                ),
+                key=lambda item: identity_candidate_key(item, identity),
             )
             for _, items in sorted(
                 candidate_groups.items(),
