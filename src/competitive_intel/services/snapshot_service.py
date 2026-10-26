@@ -36,7 +36,7 @@ class SnapshotService:
         fetcher: PageFetcher,
         cleaner: PageCleaner = clean_page,
         *,
-        cleaner_version: str = "deterministic-html-v1",
+        cleaner_version: str = "deterministic-html-v2",
     ) -> None:
         self._persistence = persistence
         self._fetcher = fetcher

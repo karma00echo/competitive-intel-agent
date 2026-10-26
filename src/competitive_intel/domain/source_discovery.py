@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -17,7 +18,7 @@ from .urls import normalize_url, same_site
 
 
 KEYWORDS = {
-    SourceType.FEATURES: ("features", "product", "solutions", "功能", "产品", "解决方案"),
+    SourceType.FEATURES: ("features", "product", "solutions", "docs", "documentation", "help", "tour", "overview", "faq", "功能", "产品", "解决方案"),
     SourceType.PRICING: ("pricing", "plans", "price", "定价", "价格", "套餐", "版本"),
     SourceType.CHANGELOG: ("changelog", "release notes", "updates", "what's new", "更新", "更新日志", "发布记录", "新功能"),
 }
@@ -41,6 +42,7 @@ def discover_sources(
     max_internal_links: int = 100,
     max_supplemental_searches: int = 3,
     existing_results: tuple[SearchResult, ...] = (),
+    max_candidates_per_type: int = 2,
 ) -> tuple[DiscoveredSource, ...]:
     if not homepage_html.strip():
         return tuple(
@@ -67,7 +69,6 @@ def discover_sources(
 
     # Reuse searches already paid for during official-domain discovery. These
     # remain candidates requiring page validation, never confirmed evidence.
-    navigation_types = set(scored)
     for result in existing_results:
         try:
             url = normalize_url(result.url)
@@ -77,8 +78,6 @@ def discover_sources(
             continue
         haystack = f"{result.title} {result.snippet} {url}".casefold()
         for source_type, keywords in KEYWORDS.items():
-            if source_type in navigation_types:
-                continue
             matches = {word for word in keywords if word in haystack}
             if matches:
                 scored[source_type][url].update(matches)
@@ -118,12 +117,19 @@ def discover_sources(
                 False, DiscoveryStatus.NOT_FOUND,
             ))
             continue
-        ranked = sorted(candidates.items(), key=lambda item: (-len(item[1]), item[0]))
+        ranked = sorted(candidates.items(), key=lambda item: (-candidate_score(source_type, item[0], item[1]), item[0]))
+        ranked = [item for item in ranked if candidate_score(source_type, item[0], item[1]) > 0]
+        if not ranked:
+            output.append(DiscoveredSource(source_type, None, None, "no_applicable_candidate", (), 0.0,
+                                           False, DiscoveryStatus.NOT_FOUND))
+            continue
         url, signals = ranked[0]
-        status = DiscoveryStatus.AMBIGUOUS if len(ranked) > 1 and len(ranked[0][1]) == len(ranked[1][1]) else DiscoveryStatus.FOUND
+        status = DiscoveryStatus.AMBIGUOUS if len(ranked) > 1 and candidate_score(source_type, ranked[0][0], ranked[0][1]) == candidate_score(source_type, ranked[1][0], ranked[1][1]) else DiscoveryStatus.FOUND
         output.append(DiscoveredSource(
             source_type, url, url, "internal_link_or_site_search",
             tuple(sorted(signals)), min(0.95, 0.55 + 0.1 * len(signals)), True, status,
+            tuple(u for u, _ in ranked[:max_candidates_per_type]),
+            tuple(candidate_score(source_type, u, v) for u, v in ranked[:max_candidates_per_type]),
         ))
         if len(output) >= max_pages:
             break
@@ -133,3 +139,23 @@ def discover_sources(
 def domain_from_homepage(url: str) -> str:
     from .urls import domain_from_url
     return domain_from_url(url)
+
+
+def candidate_score(source_type, url, signals):
+    parts = set(urlsplit(url).path.casefold().strip("/").split("/"))
+    if source_type in {SourceType.FEATURES, SourceType.PRICING}:
+        if parts & {"changelog", "releases", "news", "blog", "login", "signin"}:
+            return 0
+    preferred = ({"features", "product", "docs", "documentation", "help", "tour", "overview", "faq"}
+                 if source_type == SourceType.FEATURES else {"pricing", "plans", "price"})
+    dedicated = bool(parts & preferred) and not parts.intersection({"teams", "solutions", "customers"})
+    return len(signals) + (10 if dedicated else 0)
+
+
+def applicable_page(source_type, page):
+    if not page or page.fetch_status.value != "SUCCESS" or not page.clean_content.strip():
+        return False
+    if source_type == SourceType.PRICING:
+        text = page.clean_content.casefold()
+        return any(token in text for token in ("price", "pricing", "plan", "free", "billed", "month", "year", "$", "定价", "套餐", "免费"))
+    return True

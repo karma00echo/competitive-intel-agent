@@ -35,6 +35,9 @@ class BudgetedSession:
         if kind not in {"searches", "fetches", "understanding", "evaluation", "extraction", "synthesis"}:
             raise ValueError("Unknown budget purpose")
         self.budget, self.kind = budget, kind
+        if session is None and kind == "fetches":
+            from .http.public_session import PublicSession
+            session = PublicSession()
         self.session = session or requests.Session()
         self.rates = rates or CostRates()
 
@@ -64,7 +67,7 @@ class BudgetedSession:
         history = []
         for _ in range(6):
             if urlsplit(url).scheme not in {"https", "http"}:
-                raise requests.InvalidURL("Only public web URL schemes are supported")
+                raise requests.exceptions.InvalidURL("Only public web URL schemes are supported")
             self.budget.reserve(fetches=1)
             response = self.session.get(url, allow_redirects=False, **kwargs)
             if not follow or response.status_code not in {301, 302, 303, 307, 308} or not response.headers.get("Location"):
@@ -73,7 +76,7 @@ class BudgetedSession:
             history.append(response)
             url = urljoin(url, response.headers["Location"])
             response.close()
-        raise requests.TooManyRedirects("Bounded redirect limit reached")
+        raise requests.exceptions.TooManyRedirects("Bounded redirect limit reached")
 
     def close(self):
         self.session.close()

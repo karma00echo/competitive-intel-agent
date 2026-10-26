@@ -202,3 +202,16 @@ def test_supplemental_search_limit_stops_additional_queries() -> None:
     )
     assert len(provider.calls) == 1
     assert all(item.status == DiscoveryStatus.NOT_FOUND for item in results)
+
+
+def test_search_docs_are_not_discarded_when_navigation_has_audience_page():
+    provider = FixtureSearchProvider()
+    results = discover_sources(normalize_competitor_name('Atlas'), 'https://atlas.example/',
+        '<main><a href="/teams/product">Product features</a></main>', (SourceType.FEATURES,),
+        provider=provider, max_supplemental_searches=0,
+        existing_results=(SearchResult('Atlas documentation', 'https://atlas.example/docs',
+                                       'Product docs', 1, 'offline', 'Atlas features'),))
+    assert results[0].candidate_url == 'https://atlas.example/docs'
+    assert results[0].status == DiscoveryStatus.FOUND
+    assert len(results[0].candidate_urls) == 2
+    assert not provider.calls

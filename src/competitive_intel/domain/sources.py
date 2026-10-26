@@ -72,6 +72,8 @@ class DiscoveredSource:
     confidence: float
     needs_validation: bool
     status: DiscoveryStatus
+    candidate_urls: tuple[str, ...] = ()
+    candidate_scores: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,8 @@ class SourceDiscoveryLimits:
     max_internal_links: int = 100
     max_supplemental_searches: int = 3
     max_pages: int = 8
+    max_candidates_per_type: int = 2
+    max_identity_pages_per_domain: int = 2
 
 
 @dataclass(frozen=True, slots=True)

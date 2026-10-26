@@ -153,3 +153,17 @@ def test_encoding_error_is_reported() -> None:
 
     assert result.fetch_status == FetchStatus.FAILED
     assert result.error_code == "ENCODING_ERROR"
+
+
+@pytest.mark.parametrize('header,markup,encoding', [
+    ('text/html', '<meta charset="utf-8">', 'utf-8'),
+    ('text/html', '', 'utf-8'),
+    ('text/html; charset=windows-1252', '<meta charset="utf-8">', 'cp1252'),
+    ('text/html', '<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">', 'cp1252'),
+])
+def test_encoding_uses_declarations_not_requests_default(header, markup, encoding):
+    html = f'<html><head>{markup}</head><body><p>Plans — “teams”</p></body></html>'
+    response = FakeResponse(html.encode(encoding), headers={'Content-Type':header}, encoding='ISO-8859-1')
+    result = RequestsFetcher(FakeSession(response)).fetch(_request())
+    assert result.fetch_status == FetchStatus.SUCCESS
+    assert 'Plans — “teams”' in result.raw_html

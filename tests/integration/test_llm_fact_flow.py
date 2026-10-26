@@ -212,6 +212,27 @@ def test_single_source_extraction_persists_audit_without_changes(persistence):
         service.extract("Acme", source_id=-1)
 
 
+def test_cleaner_version_isolates_cache_even_when_text_is_identical(persistence):
+    seed(persistence)
+    with persistence.transaction() as session:
+        competitor = persistence.competitors.get_by_normalized_name(session, 'acme')
+        source = persistence.sources.list_verified(session, competitor['id'])[0]
+    transport = Transport()
+    provider = LLMFactExtractionProvider(LLMSettings(api_key='test-only', model='test-model',
+        endpoint='https://model.example', max_calls=8, max_retries=0), session=transport)
+    hashes = []
+    for version in ('deterministic-html-v1', 'deterministic-html-v2', 'deterministic-html-v2'):
+        with persistence.transaction() as session:
+            run_id = persistence.agent_runs.create(session, competitor_id=competitor['id'],
+                input_name='Acme', normalized_input='acme', run_mode='UNKNOWN', current_state='PAGE_FETCHING')
+        snap = SnapshotService(persistence, Page(), cleaner_version=version).process(source_id=source['id'], run_id=run_id)
+        hashes.append(snap.clean_hash)
+        result = FactExtractionService(persistence, provider).extract('Acme', source_id=source['id'])
+        assert result.saved and not result.errors
+    assert len(set(hashes)) == 1
+    assert transport.count == 2  # v2 cannot reuse v1, but a second v2 can reuse v2.
+
+
 def test_null_feature_fields_persist_as_audited_legacy_sentinels(persistence):
     seed(persistence)
     result = runner(persistence, Transport(null_fields=True)).run("Acme")

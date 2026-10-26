@@ -71,7 +71,7 @@ class FetchPageResult:
 class CleanPageRequest:
     raw_html: str
     url: str
-    cleaner_version: str = "deterministic-html-v1"
+    cleaner_version: str = "deterministic-html-v2"
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import requests
+from email.message import Message
+from bs4.dammit import EncodingDetector
+from .public_session import PublicSession
 from bs4 import BeautifulSoup
 
 from competitive_intel.domain.webpage import (
@@ -75,7 +78,7 @@ class RequestsFetcher:
     """Fetch one page without persistence, model calls, or access-control bypass."""
 
     def __init__(self, session: HttpSession | None = None) -> None:
-        self._session = session or requests.Session()
+        self._session = session or PublicSession()
 
     def fetch(self, request: FetchPageRequest) -> FetchPageResult:
         fetched_at = _now()
@@ -224,7 +227,18 @@ class RequestsFetcher:
                 content_type=content_type,
             )
 
-        encoding = response.encoding or "utf-8"
+        header = Message()
+        header["content-type"] = content_type_header
+        declared = header.get_param("charset")
+        # Requests defaults text/html to Latin-1 even when no charset was sent.
+        # Trust explicit HTTP charset, then BOM/HTML declaration, then strict UTF-8.
+        encoding = declared or EncodingDetector.find_declared_encoding(bytes(body), is_html=True) or "utf-8"
+        if not declared:
+            if body.startswith(b"\xef\xbb\xbf"):
+                encoding = "utf-8-sig"
+            elif body.startswith((b"\xff\xfe", b"\xfe\xff")):
+                encoding = "utf-16"
+
         try:
             raw_html = bytes(body).decode(encoding, errors="strict")
         except (LookupError, UnicodeDecodeError) as exc:

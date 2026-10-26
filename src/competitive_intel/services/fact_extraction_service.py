@@ -184,7 +184,7 @@ class FactExtractionService:
                     )
             started = perf_counter()
             cache_key = sha256(json.dumps([
-                "complete-page-v2", source["id"], source["source_type"], policy_key,
+                "complete-page-v3", snapshot.get("cleaner_version"), source["id"], source["source_type"], policy_key,
                 self._limits.max_facts_per_page, content,
             ], ensure_ascii=False).encode()).hexdigest() if policy_key else None
             reused = False

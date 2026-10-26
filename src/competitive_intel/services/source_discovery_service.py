@@ -15,7 +15,7 @@ from competitive_intel.domain.official_domain import (
 from competitive_intel.domain.official_validation import validate_official_source
 from competitive_intel.domain.query_generator import generate_search_queries
 from competitive_intel.domain.search import SearchIntent, SearchRequest, SearchResult
-from competitive_intel.domain.source_discovery import discover_sources
+from competitive_intel.domain.source_discovery import discover_sources, applicable_page
 from competitive_intel.domain.sources import (
     DiscoveryStatus,
     OfficialSourceValidation,
@@ -159,12 +159,19 @@ class SourceDiscoveryService:
                 ),
             )[: self._limits.max_official_validations]
         ]
-        for result in representatives:
-            page = self._fetch_evidence(result.url)
-            if page is not None:
-                page_cache[normalize_url(result.url)] = page
-                page_cache[normalize_url(page.final_url)] = page
-            validations.append(validate_official_source(identity, result, page))
+        for representative in representatives:
+            group = candidate_groups[registrable_domain(representative.url)]
+            for result in sorted(group, key=lambda item: identity_candidate_key(item, identity))[:self._limits.max_identity_pages_per_domain]:
+                page = self._fetch_evidence(result.url)
+                if page is not None:
+                    page_cache[normalize_url(result.url)] = page
+                    page_cache[normalize_url(page.final_url)] = page
+                validation = validate_official_source(identity, result, page)
+                validations.append(validation)
+                if page and page.fetch_status == FetchStatus.SUCCESS and page.clean_content.strip():
+                    break
+                if page and page.fetch_status == FetchStatus.BLOCKED:
+                    break
         if len(candidate_groups) > self._limits.max_official_validations:
             warnings.append("Official domain validation limit reached.")
 
@@ -227,40 +234,47 @@ class SourceDiscoveryService:
                     max_internal_links=self._limits.max_internal_links,
                     max_supplemental_searches=self._limits.max_supplemental_searches,
                     existing_results=tuple(candidates_by_url.values()),
+                    max_candidates_per_type=self._limits.max_candidates_per_type,
                 )
                 validated_discoveries = []
                 for discovery in discoveries:
-                    if (
-                        discovery.status != DiscoveryStatus.FOUND
-                        or not discovery.candidate_url
-                    ):
+                    if not discovery.candidate_url:
                         validated_discoveries.append(discovery)
                         continue
                     if discovery.source_type == SourceType.HOMEPAGE:
-                        validation = official
-                    else:
-                        synthetic = SearchResult(
-                            discovery.source_type.value,
-                            discovery.candidate_url,
-                            "Discovered from verified official homepage.",
-                            1,
-                            self._search.name,
-                            "internal discovery",
-                        )
-                        validation = validate_official_source(
-                            identity,
-                            synthetic,
-                            self._fetch_evidence(discovery.candidate_url),
-                            source_type=discovery.source_type,
-                        )
-                        validations.append(validation)
-                    if validation.verification_status == VerificationStatus.VERIFIED:
-                        saved_ids.append(self._save_verified(identity, validation))
+                        saved_ids.append(self._save_verified(identity, official))
                         validated_discoveries.append(replace(discovery, needs_validation=False))
+                        continue
+                    options = discovery.candidate_urls or (discovery.candidate_url,)
+                    scores = discovery.candidate_scores or (1,) * len(options)
+                    accepted = []
+                    for index, url in enumerate(options[:self._limits.max_candidates_per_type]):
+                        if accepted and scores[index] < accepted[0][0]:
+                            break
+                        page = page_cache.get(normalize_url(url))
+                        if page is None:
+                            page = self._fetch_evidence(url)
+                            page_cache[normalize_url(url)] = page
+                        synthetic = SearchResult(discovery.source_type.value, url,
+                            "Candidate from official navigation or search; not evidence.", 1,
+                            self._search.name, "internal discovery")
+                        validation = validate_official_source(identity, synthetic, page, source_type=discovery.source_type)
+                        validations.append(validation)
+                        owned = registrable_domain(validation.normalized_url) == official.domain
+                        suitable = owned and applicable_page(discovery.source_type, page)
+                        self.fetch_audit.append({"url": url, "source_type": discovery.source_type.value,
+                                                 "candidate_applicable": suitable, "ownership_matches": owned})
+                        if validation.verification_status == VerificationStatus.VERIFIED and suitable:
+                            accepted.append((scores[index], validation))
+                        if page and page.fetch_status == FetchStatus.BLOCKED:
+                            break
+                    if len(accepted) == 1:
+                        validation = accepted[0][1]
+                        saved_ids.append(self._save_verified(identity, validation))
+                        validated_discoveries.append(replace(discovery, candidate_url=validation.candidate_url,
+                            normalized_url=validation.normalized_url, status=DiscoveryStatus.FOUND, needs_validation=False))
                     else:
-                        validated_discoveries.append(
-                            replace(discovery, status=DiscoveryStatus.AMBIGUOUS)
-                        )
+                        validated_discoveries.append(replace(discovery, status=DiscoveryStatus.AMBIGUOUS))
                 discoveries = tuple(validated_discoveries)
 
         pending = tuple(

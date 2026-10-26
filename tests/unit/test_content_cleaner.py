@@ -59,3 +59,26 @@ def test_article_is_used_before_body() -> None:
 
     assert result.clean_content == "Release notes\nAdded workflow automation."
     assert "Body-only noise" not in result.clean_content
+
+
+def test_prices_nested_inline_text_and_conditions_remain_contiguous():
+    result = _clean('<main><h2>Pro</h2><div><span>$</span><span>10</span> USD</div>'
+                    '<label>per user/month</label><div>Billed yearly</div>'
+                    '<p>Other conditions apply.</p><h2>Business</h2><div>$20 USD</div></main>')
+    assert result.clean_content == 'Pro\n$ 10 USD\nper user/month\nBilled yearly\nOther conditions apply.\nBusiness\n$20 USD'
+    assert result.clean_content.count('$ 10') == 1
+    assert 'Billed yearly\nBusiness' not in result.clean_content
+
+
+def test_hidden_noise_removed_but_repeated_table_cells_kept():
+    html = ('<style>.secret {display:none}</style><main><div hidden>Hidden</div>'
+            '<span aria-hidden="true">Duplicate</span><div style="visibility:hidden">Invisible</div>'
+            '<div class="secret">CSS hidden</div><script>secret()</script>'
+            '<table><tr><td>Unlimited</td><td>Unlimited</td></tr></table></main>')
+    result = _clean(html)
+    assert result.clean_content == 'Unlimited\nUnlimited'
+
+
+def test_conditional_css_is_not_applied_without_a_viewport():
+    html = '<style>@media(max-width:500px){.price{display:none}}</style><main><div class="price">$10 USD</div></main>'
+    assert '$10 USD' in _clean(html).clean_content
