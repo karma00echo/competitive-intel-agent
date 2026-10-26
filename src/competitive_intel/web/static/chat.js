@@ -44,24 +44,15 @@
       if(epoch!==revision)return;
       box.replaceChildren(node('h2','Agent · 竞品分析'),node('p',`#${record.runId} · ${data.phase} · ${data.status} · ${data.elapsed_seconds||0}s`));
       box.append(node('p','真实业务工作流；结果是否完整以证据和最终状态为准。'),link('运行审计',`/developer/runs/${record.runId}`));
-      if(data.task)box.append(node('pre',JSON.stringify(data.task,null,2)));
+      if(data.task)box.append(node('p',`${data.task.target} / ${(data.task.competitors||[]).join('、')}`));
       if(data.discovery)box.append(node('p',`候选选择：${(data.discovery.selected||[]).join('、')} · ${data.discovery.status}`));
       for(const product of data.products||[])box.append(node('p',`${product.name} · ${product.status} · ${product.research.fact_count} 条事实 · ${(product.issues||[]).join(' / ')}`));
-      box.append(node('pre',JSON.stringify({budget:data.budget,issues:data.issues},null,2)));
+      const audit=node('details');audit.append(node('summary','任务与预算详情'),node('pre',JSON.stringify({task:data.task,budget:data.budget,issues:data.issues},null,2)));box.append(audit);
       if(data.status==='RUNNING'){schedule(()=>watchWorkflow(box,record,epoch));return;}
       if(data.report_id){
         const report=await api(`/api/reports/${data.report_id}`);if(epoch!==revision)return;
         box.append(node('h3',`${report.report_type} · ${data.analysis_complete?'已完成所选范围':'部分结果，请核对信息缺口'}`));
-        const content=report.content_json, matrix=content.matrix;
-        const table=node('table'),head=node('tr');['产品','维度','状态','事实'].forEach(v=>head.append(node('th',v)));table.append(head);
-        for(const product of matrix.products)for(const [dimension,cell] of Object.entries(product.cells)){
-          const tr=node('tr');[product.name,dimension,cell.status,cell.fact_ids.map(id=>JSON.stringify(matrix.facts[id].value)).join('；')].forEach(v=>tr.append(node('td',v)));table.append(tr);
-        }box.append(table,node('h3','综合结论 · 分析推断'));
-        for(const finding of content.conclusions)box.append(node('p',finding.text),node('small',finding.evidence_ids.join(', ')));
-        if(!content.conclusions.length)box.append(node('p','无法形成受证据支持的综合结论。'));
-        const details=node('details');details.append(node('summary','来源引用与信息缺口'));
-        for(const [id,evidence] of Object.entries(matrix.evidence))details.append(node('p',`${id} · ${evidence.quote}`),link(evidence.url,evidence.url));
-        details.append(node('pre',JSON.stringify({gaps:matrix.gaps,limitations:content.limitations},null,2)));box.append(details);
+        renderCompetitiveReading(box,report);
         box.append(link('查看正式报告记录',`/reports/${data.report_id}`),link('导出 Markdown',`/api/reports/${data.report_id}/download`));
       }else box.append(node('p','本次没有生成报告。澄清或缺失证据不能视为分析成功。'));
     }catch(error){if(epoch===revision)box.append(node('p',`读取失败：${error.message}。可从 History 重新查看，不会重启任务。`));}

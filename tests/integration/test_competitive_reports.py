@@ -83,6 +83,21 @@ def test_three_product_report_is_idempotent_and_api_export_matches_storage(persi
         AgentRunner.compare_products(persistence, task().model_copy(update={"dimensions": ["pricing"]}), products, context)
 
 
+def test_chinese_reading_model_and_export_share_persisted_payload(persistence):
+    products = [seed(persistence, name) for name in ["Alpha", "Beta", "Gamma"]]
+    context, transport = synthesis_context()
+    chinese = task().model_copy(update={"output_language": "zh-CN"})
+    result = AgentRunner.compare_products(persistence, chinese, products, context)
+    report = CompetitorReportService(persistence).get(run_id=result["run_id"])
+    assert report.content_json["task"]["output_language"] == "zh-CN"
+    assert report.content_json["presentation"]["language"] == "zh-CN"
+    assert "执行摘要" in report.content_markdown
+    with TestClient(create_app(settings=settings(), persistence=persistence)) as client:
+        body = client.get(f"/api/reports/{report.report_id}").json()["data"]
+        assert body["content_json"]["presentation"] == report.content_json["presentation"]
+        assert client.get(f"/api/reports/{report.report_id}/download").text == report.content_markdown
+
+
 @pytest.mark.parametrize("case", ["missing", "failed_product", "budget", "provider", "unsupported"])
 def test_partial_reports_never_become_complete(persistence, case):
     products = [seed(persistence, name, failed=case == "failed_product" and name == "Beta") for name in ["Alpha", "Beta", "Gamma"]]

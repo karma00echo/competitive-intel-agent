@@ -6,44 +6,31 @@ from html import escape
 import json
 
 from competitive_intel.domain.competitive_matrix import decode
+from competitive_intel.domain.analysis_task import AnalysisTaskSpec
 from .competitive_analysis_service import CompetitiveAnalysisService
 from .competitive_matrix_service import CompetitiveMatrixService
 
 
 def render_competitive_report(task, analysis):
-    """Render the exact stored payload; source text never becomes markup."""
+    """One persisted reading model drives Markdown and the formal UI."""
+    from competitive_intel.domain.comparison_presentation import reading_view
+    view = analysis.get("presentation") or reading_view(task, analysis)
     def plain(value):
-        return escape(str(value)).replace("\n", " ").replace("|", "&#124;").replace("`", "&#96;")
-
-    matrix = analysis["matrix"]
-    lines = [f"# Competitive analysis: {plain(task.target)}", "",
-             f"Status: **{analysis['status']}**", "",
-             "Facts are observed evidence; conclusions are analysis inferences. Missing data is not absence.", "",
-             "## Fact matrix", "", "| Product | Dimension | Status | Facts |", "|---|---|---|---|"]
-    for product in matrix["products"]:
-        for dimension, cell in product["cells"].items():
-            lines.append(f"| {plain(product['name'])} | {dimension} | {cell['status']} | {', '.join(cell['fact_ids'])} |")
-    lines.extend(["", "## Observed facts and unresolved conflicts", ""])
-    for fid, fact in matrix["facts"].items():
-        lines.append(f"- {fid} — {plain(fact['product'])} ({fact['verification_status']}): "
-                     f"{plain(json.dumps(fact['value'], ensure_ascii=False))}; evidence: {', '.join(fact['evidence_ids'])}")
-    lines.extend(["", "## Supported comparisons", ""])
-    for finding in analysis["supported_findings"]:
-        lines.append(f"- {finding['id']} [ANALYSIS_INFERENCE]: {plain(finding['text'])} "
-                     f"Facts: {', '.join(finding['fact_ids'])}; evidence: {', '.join(finding['evidence_ids'])}")
-    lines.extend(["", "## Synthesis", "", f"Synthesis status: {analysis['synthesis_status']}", ""])
-    lines.extend(f"- [ANALYSIS_INFERENCE] {plain(f['text'])} ({', '.join(f['evidence_ids'])})" for f in analysis["conclusions"])
-    if not analysis["conclusions"]:
-        lines.append("Information insufficient or synthesis unavailable; no generated conclusion.")
-    lines.extend(["", "## Evidence", ""])
-    for eid, evidence in matrix["evidence"].items():
-        lines.append(f"- {eid}: {plain(evidence['url'])} — {plain(evidence['quote'])}; "
-                     f"collected {evidence['collected_at']}; product {evidence['product_id']}, "
-                     f"source {evidence['source_id']}, snapshot {evidence['snapshot_id']}, "
-                     f"observation {evidence['observation_id']}, run {evidence['run_id']}")
-    lines.extend(["", "## Limitations and gaps", ""])
-    for gap in matrix["gaps"] + analysis["limitations"] + analysis["issues"]:
-        lines.append("- " + plain(json.dumps(gap, ensure_ascii=False)))
+        return escape(str(value)).replace("\n", " ").replace("|", "&#124;").replace("`", "&#96;").replace("[", "&#91;").replace("]", "&#93;")
+    lines = ["# " + plain(view["title"]), "", "**" + ("部分报告" if view["language"] == "zh-CN" and view["status"] != "COMPLETE" else view["status"]) + "**", ""]
+    for section in view["sections"]:
+        lines += ["## " + section["heading"], "", *[plain(p) for p in section.get("paragraphs", [])], ""]
+        if "headers" in section:
+            lines.append("| " + " | ".join(plain(h) for h in section["headers"]) + " |")
+            lines.append("| " + " | ".join("---" for _ in section["headers"]) + " |")
+            lines.extend("| " + " | ".join(plain(c) for c in row) + " |" for row in section["rows"])
+            lines.append("")
+    lines += ["## " + ("证据来源（原文）" if view["language"] == "zh-CN" else "Sources (original quotations)"), ""]
+    for evidence in view["references"]:
+        lines += ["- [" + evidence["label"] + "] " + plain(evidence["url"]) + " — " + plain(evidence["collected_at"]),
+                  *["> " + plain(line) for line in evidence["quote"].split("\n")], ""]
+    lines += ["<details><summary>Technical audit / 技术详情</summary>", "", "```json",
+              json.dumps({"gaps": view["gaps"], "facts": analysis["matrix"]["facts"], "evidence": analysis["matrix"]["evidence"]}, ensure_ascii=False, indent=2).replace("<", "\\u003c").replace("`", "\\u0060"), "```", "</details>"]
     return "\n".join(lines) + "\n"
 
 
@@ -69,7 +56,9 @@ class CompetitiveReportService:
                 raise ValueError("TARGET_IDENTITY_MISMATCH")
             existing = p.reports.get_comparison_task(tx, context.budget.task_id)
             if existing:
-                if decode(existing["input_summary"])["signature"] != signature:
+                stored_scope = decode(existing["input_summary"])
+                compatible_task = AnalysisTaskSpec.model_validate(stored_scope["task"]).model_dump()
+                if compatible_task != scope["task"] or stored_scope["products"] != json.loads(json.dumps(scope["products"])):
                     raise ValueError("TASK_SCOPE_CHANGED")
                 return decode(existing["output_summary"])
             discovery_call = p.reports.get_discovery_task(tx, context.budget.task_id)
@@ -77,7 +66,7 @@ class CompetitiveReportService:
             if task.discover_competitors and not discovery:
                 raise ValueError("TRUSTED_DISCOVERY_REQUIRED")
             if discovery:
-                if (discovery.get("task") != task.model_dump()
+                if (AnalysisTaskSpec.model_validate(discovery["task"]).model_dump() != task.model_dump()
                         or set(discovery["selected"]) != {product.name for product in products[1:]}):
                     raise ValueError("DISCOVERY_SCOPE_MISMATCH")
                 budget = discovery["budget"]
@@ -121,16 +110,18 @@ class CompetitiveReportService:
             analysis["discovery_run_id"] = discovery_call["run_id"] if discovery_call else None
             complete = analysis["status"] == "COMPLETE"
             report_type = "COMPETITIVE_ANALYSIS" if complete else "COMPETITIVE_ANALYSIS_PARTIAL"
+            from competitive_intel.domain.comparison_presentation import reading_view
+            analysis["presentation"] = reading_view(task, analysis)
             markdown = render_competitive_report(task, analysis)
             result = {"phase": "competitive_analysis", "status": analysis["status"], "run_id": run_id,
                       "analysis_complete": complete, "budget": context.budget.snapshot(), "report_id": None,
                       "research_policy": context.audit_policy(), "report_type": report_type}
             with p.transaction() as tx:
                 result["report_id"] = p.reports.create(tx, competitor_id=products[0].product_id, run_id=run_id,
-                    report_type=report_type, status="GENERATED", generator_version="competitive-report-v1",
+                    report_type=report_type, status="GENERATED", generator_version="competitive-report-v2",
                     content_markdown=markdown, summary={"report_type": report_type,
-                        "title": f"Competitive analysis: {task.target}", "executive_summary": analysis["status"],
-                        "content_json": analysis, "section_count": 6, "change_summary": {}, "warnings": analysis["issues"]})
+                        "title": analysis["presentation"]["title"], "executive_summary": analysis["presentation"]["executive_summary"],
+                        "content_json": analysis, "section_count": len(analysis["presentation"]["sections"]), "change_summary": {}, "warnings": analysis["issues"]})
                 p.tool_calls.finish(tx, call_id, status="SUCCEEDED", output_summary=result)
                 p.stage_events.finish(tx, stage_id, status="SUCCEEDED")
                 p.agent_runs.finish(tx, run_id, status="COMPLETED" if complete else "PARTIAL_SUCCESS",

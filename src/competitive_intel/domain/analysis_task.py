@@ -19,6 +19,7 @@ class AnalysisTaskSpec(BaseModel):
     competitors: list[str] = Field(max_length=2)
     dimensions: list[Dimension] = Field(max_length=6)
     output_format: Literal["report", "table", "brief"]
+    output_language: Literal["zh-CN", "en"] = "en"
     discover_competitors: bool
     assumptions: list[str] = Field(max_length=5)
     clarification: str | None = Field(max_length=300)

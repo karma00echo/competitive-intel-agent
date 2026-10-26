@@ -5,6 +5,7 @@ from itertools import combinations
 import re
 
 from .competitive_matrix import utc
+from .comparison_presentation import capability_rows
 
 
 def dates(fact, matrix):
@@ -45,6 +46,20 @@ def build_findings(matrix):
             "statement_type": "ANALYSIS_INFERENCE", "fact_ids": [f["id"] for f in supported],
             "evidence_ids": evidence, "text": text})
 
+    semantic_peers = set()
+    for row in capability_rows(matrix):
+        if row["status"] != "SHARED_CATEGORY":
+            continue
+        supported = [matrix["facts"][fid] for fid in row["fact_ids"]]
+        if len({f["value"]["normalized_feature_name"].casefold() for f in supported}) < 2:
+            continue
+        semantic_peers.update(row["fact_ids"])
+        emit("SHARED_CAPABILITY_IMPLEMENTATIONS", supported,
+             f"Shared evidence category: {row['category']}. Documented implementations: "
+             + "; ".join(f["product"] + ": " + f["value"]["feature_description"] for f in supported)
+             + ". Category overlap is not equivalent implementation, exclusivity, quality or suitability. "
+               "Evaluate the documented workflows rather than counting differently named features.")
+
     for left, right in combinations(facts, 2):
         if left["product_id"] == right["product_id"] or left["category"] != right["category"]:
             continue
@@ -75,7 +90,7 @@ def build_findings(matrix):
         if fact["category"] != "FEATURE" or len(matrix["products"]) < 2: continue
         peers = [f for f in facts if f["category"] == "FEATURE" and f["product_id"] != fact["product_id"]
                  and f["value"]["normalized_feature_name"].casefold() == fact["value"]["normalized_feature_name"].casefold()]
-        if not peers:
+        if not peers and fact["id"] not in semantic_peers:
             emit("DOCUMENTED_DIFFERENTIATOR_CANDIDATE", [fact],
                  f"{fact['product']} documents {fact['value']['feature_name']}. No matching evidence was found in "
                  "the other products' collected sample; this does not mean they lack the feature.")

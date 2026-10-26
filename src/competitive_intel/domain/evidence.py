@@ -75,7 +75,7 @@ class EvidenceChecker:
                 "YEAR": ("year", "annual", "年"),
                 "USER": ("user", "用户"),
                 "WORKSPACE": ("workspace", "工作区"),
-                "ANNUAL_BILLING": ("billed annually", "annual billing", "paid annually", "年付"),
+                "ANNUAL_BILLING": ("billed annually", "billed yearly", "annual billing", "paid annually", "年付"),
                 "MONTHLY_BILLING": ("billed monthly", "monthly billing", "paid monthly", "月付"),
             }
             for enum_value in (

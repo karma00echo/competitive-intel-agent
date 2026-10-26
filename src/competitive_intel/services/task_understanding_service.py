@@ -23,6 +23,14 @@ class TaskUnderstandingService:
             return {"status": "FAILED", "task": None, "error_code": result.error, "audit": audit}
         try:
             task = AnalysisTaskSpec.model_validate(result.payload)
+            # Explicit language directives override input-language defaults. This
+            # changes presentation only, never the language of collected evidence.
+            if re.search(r"(?:用|以|使用)英文|英文(?:报告|输出)|(?:report|respond|write|output).*?in English", request.text, re.I):
+                task.output_language = "en"
+            elif re.search(r"(?:用|以|使用)中文|中文(?:报告|输出)|(?:report|respond|write|output).*?in Chinese", request.text, re.I):
+                task.output_language = "zh-CN"
+            else:
+                task.output_language = "zh-CN" if re.search(r"[\u4e00-\u9fff]", request.text) else "en"
             # Names must come from the request; automatic discovery happens later.
             for name in ([task.target] if task.target else []) + task.competitors:
                 if name.casefold() not in request.text.casefold():

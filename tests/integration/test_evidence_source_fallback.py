@@ -65,6 +65,19 @@ def test_two_equally_valid_candidates_remain_ambiguous(persistence):
     assert len(result.saved_source_ids) == 2
 
 
+def test_verified_aliases_with_same_final_page_are_not_ambiguous(persistence):
+    class Alias(Pages):
+        def fetch(self, request):
+            result = super().fetch(request)
+            if request.url.endswith('/features'):
+                return replace(result, final_url=BASE + '/docs')
+            return result
+    result = service(persistence, Alias()).discover('Atlas')
+    feature = next(d for d in result.discoveries if d.source_type == SourceType.FEATURES)
+    assert feature.status == DiscoveryStatus.FOUND
+    assert len(result.saved_source_ids) == 3
+
+
 def test_identity_shell_falls_back_within_domain_and_reuses_page(persistence):
     pages = Pages(failed=('/',))
     result = service(persistence, pages).discover('Atlas')

@@ -56,8 +56,23 @@ async function loadCompetitor(){
   }catch(e){$("competitor-title").textContent="加载失败";empty($("facts"),e.message)}
 }
 
+function renderCompetitiveReading(target, report) {
+  const view=report.content_json.presentation;
+  if(!view){const old=node('pre',report.content_markdown);old.style.whiteSpace='pre-wrap';target.append(old);return;}
+  target.append(node('p',view.status==='COMPLETE'?'完整报告 / Complete report':'部分报告 / Partial report','notice'));
+  for(const section of view.sections){
+    const box=node('section',undefined,'report-section');box.append(node('h2',section.heading));
+    for(const text of section.paragraphs||[])box.append(node('p',text));
+    if(section.headers){const table=node('table'),head=node('tr');for(const h of section.headers)head.append(node('th',h));table.append(head);
+      for(const row of section.rows){const tr=node('tr');for(const text of row)tr.append(node('td',text));table.append(tr);}box.append(table);}
+    target.append(box);
+  }
+  const sources=node('details');sources.append(node('summary','证据原文 / Source quotations'));
+  for(const e of view.references)sources.append(link(`[${e.label}] ${e.url}`,e.url),node('blockquote',e.quote),node('small',e.collected_at));target.append(sources);
+  const audit=node('details');audit.append(node('summary','技术审计 / Technical audit'),node('pre',JSON.stringify({gaps:view.gaps,facts:report.content_json.matrix.facts,evidence:report.content_json.matrix.evidence},null,2)));target.append(audit);
+}
 async function loadReport(){
-  try{const r=await api(`/api/reports/${resourceId}`);$("report-title").textContent=r.title;$("report-meta").textContent=`${r.report_type} · ${fmtTime(r.created_at)}`;$("report-summary").textContent=r.executive_summary;$("report-download").href=`/api/reports/${resourceId}/download?format=markdown`;const target=$("report-content");target.replaceChildren();if(r.content_json.matrix){const pre=node("pre",r.content_markdown,"report-item");pre.style.whiteSpace="pre-wrap";target.append(pre);return;}(r.content_json.sections||[]).forEach(section=>{const box=node("section",undefined,"report-section");box.append(node("h2",section.heading));const items=Array.isArray(section.items)?section.items:[section.items];items.forEach(item=>box.append(node("div",human(item),"report-item")));target.append(box)})}catch(e){$("report-title").textContent="报告加载失败";$("report-summary").textContent=e.message}
+  try{const r=await api(`/api/reports/${resourceId}`);$("report-title").textContent=r.title;$("report-meta").textContent=`${r.report_type} · ${fmtTime(r.created_at)}`;$("report-summary").textContent=r.executive_summary;$("report-download").href=`/api/reports/${resourceId}/download?format=markdown`;const target=$("report-content");target.replaceChildren();if(r.content_json.matrix){renderCompetitiveReading(target,r);return;}(r.content_json.sections||[]).forEach(section=>{const box=node("section",undefined,"report-section");box.append(node("h2",section.heading));const items=Array.isArray(section.items)?section.items:[section.items];items.forEach(item=>box.append(node("div",human(item),"report-item")));target.append(box)})}catch(e){$("report-title").textContent="报告加载失败";$("report-summary").textContent=e.message}
 }
 const workspaceToolLabels={
   get_competitor_profile:"查询竞品档案",discover_competitor_sources:"发现官方来源",

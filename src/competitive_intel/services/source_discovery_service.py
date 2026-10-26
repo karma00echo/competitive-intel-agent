@@ -248,6 +248,7 @@ class SourceDiscoveryService:
                     options = discovery.candidate_urls or (discovery.candidate_url,)
                     scores = discovery.candidate_scores or (1,) * len(options)
                     accepted = []
+                    accepted_pages = set()
                     for index, url in enumerate(options[:self._limits.max_candidates_per_type]):
                         if accepted and scores[index] < accepted[0][0]:
                             break
@@ -265,7 +266,12 @@ class SourceDiscoveryService:
                         self.fetch_audit.append({"url": url, "source_type": discovery.source_type.value,
                                                  "candidate_applicable": suitable, "ownership_matches": owned})
                         if validation.verification_status == VerificationStatus.VERIFIED and suitable:
-                            accepted.append((scores[index], validation))
+                            # Two independently verified aliases of the same final page
+                            # are not competing identities. Different pages remain ambiguous.
+                            final_key = (normalize_url(page.final_url), page.clean_content)
+                            if final_key not in accepted_pages:
+                                accepted.append((scores[index], validation))
+                                accepted_pages.add(final_key)
                         if page and page.fetch_status == FetchStatus.BLOCKED:
                             break
                     if len(accepted) == 1:

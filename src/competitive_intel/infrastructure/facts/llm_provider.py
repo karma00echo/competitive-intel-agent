@@ -26,7 +26,7 @@ from competitive_intel.domain.facts import (
 from .base import FactExtractionRequest, FactExtractionResponse
 
 
-POLICY_VERSION = "quoted-facts-v10-conservative-lists-and-classifications"
+POLICY_VERSION = "quoted-facts-v11-yearly-billing-alias"
 PAGE_CATEGORIES = {
     "HOMEPAGE": (FactCategory.POSITIONING, FactCategory.FEATURE),
     "FEATURES": (FactCategory.FEATURE,),
@@ -323,7 +323,7 @@ def _ground(candidate: CandidateFact, content: str, url: str, *,
                 # OTHER is a non-semantic category; PUBLIC means this public page states it.
                 continue
             aliases = {"MONTH": ("month", "monthly", "月"), "YEAR": ("year", "annual", "年"),
-                       "USER": ("user", "seat", "用户"), "ANNUAL_BILLING": ("billed annually", "annual billing", "paid annually"),
+                       "USER": ("user", "seat", "用户"), "ANNUAL_BILLING": ("billed annually", "billed yearly", "annual billing", "paid annually"),
                        "MONTHLY_BILLING": ("billed monthly", "monthly billing", "paid monthly"),
                        "CONTACT_SALES": ("contact sales", "联系销售"), "FREE": ("free", "免费"),
                        "AVAILABLE": ("available", "可用"), "NOT_DISCLOSED": ("not disclosed",)}

@@ -249,3 +249,17 @@ def test_usage_missing_is_unknown_and_refusal_is_not_a_plan():
     response.body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"refusal": "no"}}]}).encode()
     result = LLMTaskUnderstandingProvider(config(), session=Session(response)).interpret("分析豆包")
     assert result.error == "LLM_REFUSAL_OR_TOOL_CALL"
+
+
+@pytest.mark.parametrize("text,language", [
+    ("分析豆包", "zh-CN"),
+    ("分析豆包，输出英文报告", "en"),
+    ("Analyze 豆包 and write the report in English", "en"),
+    ("Analyze Atlas", "en"),
+    ("Analyze Atlas and write the report in Chinese", "zh-CN"),
+])
+def test_report_language_default_and_explicit_override(text, language):
+    target = "豆包" if "豆包" in text else "Atlas"
+    provider = LLMTaskUnderstandingProvider(config(), session=Session(Response(plan(target=target))))
+    result = TaskUnderstandingService(provider).interpret(text)
+    assert result["task"]["output_language"] == language
