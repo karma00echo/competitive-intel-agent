@@ -70,6 +70,12 @@ class ResearchContext:
         from competitive_intel.infrastructure.agent.competitive_synthesis import CompetitiveSynthesisProvider
         return CompetitiveSynthesisProvider(self.settings.llm, self.session("synthesis"))
 
+    def narrative_provider(self, *, attempt_file):
+        """Explicit isolated handoff; never automatically called by analysis."""
+        from competitive_intel.infrastructure.agent.narrative_writer import NarrativeWriter
+        return NarrativeWriter(self.settings.llm, self.session("synthesis"),
+                               live_authorized=self.allow_paid, attempt_file=attempt_file)
+
     def fact_provider(self):
         return LLMFactExtractionProvider(replace(self.settings.llm, max_calls=10, max_retries=0),
                                          session=self.session("extraction"))
