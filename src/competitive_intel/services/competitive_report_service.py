@@ -4,6 +4,8 @@ from dataclasses import asdict
 from hashlib import sha256
 from html import escape
 import json
+import re
+from urllib.parse import quote, urlsplit
 
 from competitive_intel.domain.competitive_matrix import decode
 from competitive_intel.domain.analysis_task import AnalysisTaskSpec
@@ -17,20 +19,27 @@ def render_competitive_report(task, analysis):
     view = analysis.get("presentation") or reading_view(task, analysis)
     def plain(value):
         return escape(str(value)).replace("\n", " ").replace("|", "&#124;").replace("`", "&#96;").replace("[", "&#91;").replace("]", "&#93;")
+    reference_labels = {e["label"] for e in view["references"]}
+    def cited(value):
+        parts = re.split(r"(\[\d+\])", str(value))
+        return "".join(f"[{p[1:-1]}](#source-{p[1:-1]})" if re.fullmatch(r"\[\d+\]", p) and p[1:-1] in reference_labels else plain(p) for p in parts)
     lines = ["# " + plain(view["title"]), "", "**" + ("部分报告" if view["language"] == "zh-CN" and view["status"] != "COMPLETE" else view["status"]) + "**", ""]
     for section in view["sections"]:
-        lines += ["## " + section["heading"], "", *[plain(p) for p in section.get("paragraphs", [])], ""]
+        lines += ["## " + plain(section["heading"]), "", *[cited(p) + "\n" for p in section.get("paragraphs", [])], ""]
         if "headers" in section:
             lines.append("| " + " | ".join(plain(h) for h in section["headers"]) + " |")
             lines.append("| " + " | ".join("---" for _ in section["headers"]) + " |")
-            lines.extend("| " + " | ".join(plain(c) for c in row) + " |" for row in section["rows"])
+            lines.extend("| " + " | ".join(cited(c) for c in row) + " |" for row in section["rows"])
             lines.append("")
     lines += ["## " + ("证据来源（原文）" if view["language"] == "zh-CN" else "Sources (original quotations)"), ""]
     for evidence in view["references"]:
-        lines += ["- [" + evidence["label"] + "] " + plain(evidence["url"]) + " — " + plain(evidence["collected_at"]),
+        url = evidence["url"]
+        safe_url = quote(url, safe=":/?=&%#@+;,") if urlsplit(url).scheme in {"http", "https"} else "#"
+        lines += [f'<a id="source-{plain(evidence["label"])}"></a>',
+                  "- [" + evidence["label"] + "] [" + plain(url) + "](<" + safe_url + ">) — " + plain(evidence["collected_at"]),
                   *["> " + plain(line) for line in evidence["quote"].split("\n")], ""]
     lines += ["<details><summary>Technical audit / 技术详情</summary>", "", "```json",
-              json.dumps({"gaps": view["gaps"], "facts": analysis["matrix"]["facts"], "evidence": analysis["matrix"]["evidence"]}, ensure_ascii=False, indent=2).replace("<", "\\u003c").replace("`", "\\u0060"), "```", "</details>"]
+              json.dumps({"gaps": view["gaps"], "writing": view.get("writing"), "facts": analysis["matrix"]["facts"], "evidence": analysis["matrix"]["evidence"]}, ensure_ascii=False, indent=2).replace("<", "\\u003c").replace("`", "\\u0060"), "```", "</details>"]
     return "\n".join(lines) + "\n"
 
 
@@ -118,7 +127,7 @@ class CompetitiveReportService:
                       "research_policy": context.audit_policy(), "report_type": report_type}
             with p.transaction() as tx:
                 result["report_id"] = p.reports.create(tx, competitor_id=products[0].product_id, run_id=run_id,
-                    report_type=report_type, status="GENERATED", generator_version="competitive-report-v2",
+                    report_type=report_type, status="GENERATED", generator_version="competitive-report-v3",
                     content_markdown=markdown, summary={"report_type": report_type,
                         "title": analysis["presentation"]["title"], "executive_summary": analysis["presentation"]["executive_summary"],
                         "content_json": analysis, "section_count": len(analysis["presentation"]["sections"]), "change_summary": {}, "warnings": analysis["issues"]})

@@ -51,7 +51,7 @@
       if(data.status==='RUNNING'){schedule(()=>watchWorkflow(box,record,epoch));return;}
       if(data.report_id){
         const report=await api(`/api/reports/${data.report_id}`);if(epoch!==revision)return;
-        box.append(node('h3',`${report.report_type} · ${data.analysis_complete?'已完成所选范围':'部分结果，请核对信息缺口'}`));
+        box.append(node('h3',report.title),node('p',data.analysis_complete?'已完成所选范围':'部分结果，请核对信息缺口'));
         renderCompetitiveReading(box,report);
         box.append(link('查看正式报告记录',`/reports/${data.report_id}`),link('导出 Markdown',`/api/reports/${data.report_id}/download`));
       }else box.append(node('p','本次没有生成报告。澄清或缺失证据不能视为分析成功。'));
