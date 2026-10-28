@@ -44,14 +44,23 @@ class StoredCandidateWriter:
     """Publish independently reviewed saved prose with zero new provider calls."""
     usage = None
 
-    def __init__(self, persistence, report_id):
+    def __init__(self, persistence, report_id, *, revision=None):
         with persistence.transaction() as tx:
             row = persistence.reports.get(tx, report_id)
         analysis = decode(row["summary_json"])["content_json"]
         self.audit = analysis["presentation"]["writing"]["analytical"]
         self.origin = "fixture" if self.audit["origin"] == "fixture" else "model_replay"
+        self.revision = None
+        if revision is not None:
+            # Server-owned editorial copy; never mutate the historical candidate.
+            if (revision.get("source_report_id") != report_id
+                    or revision.get("source_candidate_hash") != digest(self.audit["candidate"])
+                    or revision.get("packet_hash") != self.audit["packet_hash"]
+                    or not revision.get("changes") or not revision.get("reviewer")):
+                raise ValueError("REVIEWED_REVISION_MISMATCH")
+            self.revision = revision
 
     def write(self, request):
         if digest(request) != self.audit["packet_hash"]:
             raise ValueError("REVIEWED_EVIDENCE_CHANGED")
-        return self.audit["candidate"]
+        return self.revision["payload"] if self.revision else self.audit["candidate"]

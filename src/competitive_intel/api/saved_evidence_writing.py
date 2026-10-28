@@ -42,7 +42,9 @@ def write_saved(payload: SavedWritingRequest, request: Request):
         context = factory()
     elif os.getenv("REPORT_WRITER_REVIEWS") and not payload.allow_paid:
         context = ResearchContext(request.app.state.settings, budget=isolated_budget(), rates=reviewed_rates())
-        context.report_writer = StoredCandidateWriter(p, payload.report_id)
+        revision_path = os.getenv("REPORT_WRITER_REVISION")
+        revision = json.loads(Path(revision_path).read_text(encoding="utf-8")) if revision_path else None
+        context.report_writer = StoredCandidateWriter(p, payload.report_id, revision=revision)
         context.writing_reviews = json.loads(Path(os.environ["REPORT_WRITER_REVIEWS"]).read_text(encoding="utf-8"))
     elif os.getenv("REPORT_WRITER_FIXTURE") and not payload.allow_paid:
         context = ResearchContext(request.app.state.settings, budget=isolated_budget(), rates=reviewed_rates())

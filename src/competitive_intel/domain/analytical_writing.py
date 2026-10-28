@@ -110,6 +110,8 @@ def compose_analysis(task, analysis, provider, *, goal="", reviews=None):
         accepted, diagnostics = validate_document(payload, packet, reviews)
         audit.update(candidate=payload, diagnostics=diagnostics, usage=getattr(provider, "usage", None),
                      raw_response=getattr(provider, "raw_output", None))
+        if getattr(provider, "revision", None):
+            audit["editorial_revision"] = deepcopy(provider.revision)
     except Exception as exc:
         accepted = []
         code = "JSON_INVALID" if isinstance(exc, json.JSONDecodeError) else "PROVIDER_OR_JSON_FAILURE"
