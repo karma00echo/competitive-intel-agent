@@ -50,6 +50,12 @@ def start(payload: WorkflowRequest, request: Request):
         raise HTTPException(503, detail=", ".join(state["blockers"]))
     factory = getattr(request.app.state, "workflow_context_factory", None)
     context = factory() if factory else ResearchContext(request.app.state.settings, allow_paid=True, rates=CostRates.from_env())
+    if not factory and os.getenv("AI_REPORT_WRITER_ENABLED") == "1":
+        from pathlib import Path
+        directory = Path("build/writing-attempts")
+        directory.mkdir(parents=True, exist_ok=True)
+        context.enable_report_writer(directory / (context.budget.task_id + ".json"))
+        context.writing_goal = payload.text
     try:
         workflow = AgentRunner.workflow(request.app.state.persistence, context)
         rid = request.app.state.task_manager.start_workflow(payload.text, workflow)

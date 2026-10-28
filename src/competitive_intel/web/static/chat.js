@@ -128,6 +128,17 @@
     };
   }
   async function answer(box,record,epoch) {
+    if(record.savedWriting){
+      if(record.reportId){const report=await api(`/api/reports/${record.reportId}`);renderCompetitiveReading(box,report);box.append(link('打开正式报告',`/reports/${record.reportId}`),link('导出 Markdown',`/api/reports/${record.reportId}/download`));return;}
+      if(record.started){box.append(node('p',record.error||'请求已提交，请从 History 核对；不会自动重发。'));return;}
+      box.append(node('p','沿用来源报告的产品及维度，重新校验证据；不搜索或抓取。Fixture 仅供工程演示。自由分析未经独立审核不会进入正文。'));
+      const start=async paid=>{if(record.started)return;record.started=true;persist();try{
+        const result=await api('/api/analyst/saved-writing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({report_id:record.sourceReport,text:record.text,request_id:record.requestId,allow_paid:paid})});
+        if(!result.report_id)throw new Error('报告未保存，请查看 History');record.reportId=result.report_id;persist();if(epoch===revision){const report=await api(`/api/reports/${record.reportId}`);renderCompetitiveReading(box,report);box.append(link('打开正式报告',`/reports/${record.reportId}`),link('导出 Markdown',`/api/reports/${record.reportId}/download`));}
+      }catch(e){record.error=`未完成交付：${e.message}`;persist();box.append(node('p',record.error));}};
+      const fixture=node('button','运行已配置的离线 Fixture');fixture.type='button';fixture.onclick=()=>start(false);box.append(fixture);
+      const live=node('button','确认单次 AI 写作：最多 $0.50 预留');live.type='button';live.onclick=()=>start(true);box.append(live);return;
+    }
     if(record.workflow){
       if(record.runId)return watchWorkflow(box,record,epoch);
       if(record.started||record.error){box.append(node('p',record.error||'启动响应未保存，请先检查 History；不会自动重发。'),link('History','/history'));return;}
@@ -198,7 +209,7 @@
     event.preventDefault();const text=$('chat-input').value.trim();if(!text||sending)return;
     if(current?.messages.length>=60){message('agent','本段对话已达到 60 条请求上限，请新建分析。');return;}
     sending=true;$('chat-send').disabled=true;ensureConversation(text);showConversation();
-    const record={text,workflow:$('chat-mode').value==='workflow'};current.messages.push(record);persist();$('chat-input').value='';message('user',text);const box=message('agent');
+    const record={text,workflow:$('chat-mode').value==='workflow',savedWriting:$('chat-mode').value==='saved-writing',sourceReport:Number($('source-report')?.value),requestId:crypto.randomUUID()};current.messages.push(record);persist();$('chat-input').value='';message('user',text);const box=message('agent');
     const epoch=revision;await answer(box,record,epoch);if(epoch===revision){sending=false;$('chat-send').disabled=false;$('chat-input').focus();}
   };
   $('chat-input').onkeydown=event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();$('chat-form').requestSubmit();}};

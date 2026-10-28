@@ -8,6 +8,15 @@ from competitive_intel.domain.analysis_task import AnalysisTaskSpec, InterpretTa
 from competitive_intel.infrastructure.agent.task_understanding import PROMPT_VERSION, TaskUnderstandingProvider
 
 
+def output_language(text):
+    if re.search(r"(?:用|以|使用)英文|英文(?:报告|输出)|(?:report|respond|write|output).*?in English", text, re.I):
+        return "en"
+    elif re.search(r"(?:用|以|使用)中文|中文(?:报告|输出)|(?:report|respond|write|output).*?in Chinese", text, re.I):
+        return "zh-CN"
+    else:
+        return "zh-CN" if re.search(r"[\u4e00-\u9fff]", text) else "en"
+
+
 class TaskUnderstandingService:
     def __init__(self, provider: TaskUnderstandingProvider):
         self.provider = provider
@@ -25,12 +34,7 @@ class TaskUnderstandingService:
             task = AnalysisTaskSpec.model_validate(result.payload)
             # Explicit language directives override input-language defaults. This
             # changes presentation only, never the language of collected evidence.
-            if re.search(r"(?:用|以|使用)英文|英文(?:报告|输出)|(?:report|respond|write|output).*?in English", request.text, re.I):
-                task.output_language = "en"
-            elif re.search(r"(?:用|以|使用)中文|中文(?:报告|输出)|(?:report|respond|write|output).*?in Chinese", request.text, re.I):
-                task.output_language = "zh-CN"
-            else:
-                task.output_language = "zh-CN" if re.search(r"[\u4e00-\u9fff]", request.text) else "en"
+            task.output_language = output_language(request.text)
             # Names must come from the request; automatic discovery happens later.
             for name in ([task.target] if task.target else []) + task.competitors:
                 if name.casefold() not in request.text.casefold():

@@ -38,6 +38,8 @@ def reviewed_rates():
 
 
 class NarrativeWriter:
+    system_prompt = SYSTEM
+    isolated = True
     def __init__(self, settings, transport, *, live_authorized=False, attempt_file=None):
         self.settings, self.transport = settings, transport
         self.live_authorized = live_authorized
@@ -59,7 +61,7 @@ class NarrativeWriter:
             raise ValueError("NARRATIVE_MODEL_CAPACITY")
         payload = dict(model=cfg.model, max_tokens=4000, thinking={"type": "disabled"},
                        response_format={"type": "json_object"}, stream=False,
-                       messages=[dict(role="system", content=SYSTEM), dict(role="user", content=json.dumps(request, ensure_ascii=False, separators=(",", ":")))])
+                       messages=[dict(role="system", content=self.system_prompt), dict(role="user", content=json.dumps(request, ensure_ascii=False, separators=(",", ":")))])
         # Same conservative byte-token upper bound used by BudgetedSession. Only
         # text messages, fixed framing, no images/files/tools or reasoning output.
         bound = len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) + 1024
@@ -76,7 +78,7 @@ class NarrativeWriter:
         if rates.input_per_million != MODEL_REVIEW["input_per_million"] or rates.output_per_million != MODEL_REVIEW["output_per_million"]:
             raise ValueError("NARRATIVE_UNREVIEWED_RATES")
         limit = self.transport.budget.limits
-        if (limit.models != 1 or limit.synthesis != 1 or any(getattr(limit, k) for k in
+        if self.isolated and (limit.models != 1 or limit.synthesis != 1 or any(getattr(limit, k) for k in
                 ("searches", "fetches", "understanding", "evaluation", "extraction")) or limit.tokens > 20_000 or limit.cost_microusd > 500_000):
             raise ValueError("NARRATIVE_ISOLATED_BUDGET_REQUIRED")
         # Reserve full authorized worst-case tokens/cost before HTTP, never refund.

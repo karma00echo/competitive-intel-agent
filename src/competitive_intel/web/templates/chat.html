@@ -19,7 +19,8 @@
 <form id="chat-form" class="chat-composer">
   <label for="chat-input">Product name or analysis request</label>
   <textarea id="chat-input" maxlength="1000" rows="3" required placeholder="比较豆包和 Kimi 的核心功能与定价策略，并生成竞品分析报告。"></textarea>
-  <label for="chat-mode">任务类型</label><select id="chat-mode"><option value="workflow">自然语言竞品分析</option><option value="legacy">已有记录查询 / 单产品快捷命令</option></select>
+  <label for="chat-mode">任务类型</label><select id="chat-mode"><option value="workflow">自然语言竞品分析</option><option value="saved-writing">已有证据 → AI 分析报告</option><option value="legacy">已有记录查询 / 单产品快捷命令</option></select>
+  <label for="source-report">已有证据模式：来源报告编号（范围沿用该报告，正文需求须写明产品名）</label><input id="source-report" type="number" min="1" placeholder="来源报告编号">
   <div class="chat-composer-bottom"><span>证据约束研究 · Ctrl / ⌘ + Enter</span><button type="submit" id="chat-send" aria-label="发送消息">{{ icon('arrow') }}</button></div>
 </form>
 <p id="chat-error" role="alert" hidden></p>

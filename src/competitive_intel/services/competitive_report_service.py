@@ -56,6 +56,9 @@ class CompetitiveReportService:
         if not products or not products[0].identity_verified or products[0].product_id is None:
             raise ValueError("VERIFIED_TARGET_REQUIRED")
         scope = {"task": task.model_dump(), "products": [asdict(p) for p in products]}
+        if getattr(context, "report_writer", None) is not None:
+            scope["writing_goal"] = context.writing_goal
+            scope["source_report_id"] = getattr(context, "source_report_id", None)
         signature = sha256(json.dumps(scope, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         p = self.persistence
         with p.transaction() as tx:
@@ -67,7 +70,9 @@ class CompetitiveReportService:
             if existing:
                 stored_scope = decode(existing["input_summary"])
                 compatible_task = AnalysisTaskSpec.model_validate(stored_scope["task"]).model_dump()
-                if compatible_task != scope["task"] or stored_scope["products"] != json.loads(json.dumps(scope["products"])):
+                if (compatible_task != scope["task"] or stored_scope["products"] != json.loads(json.dumps(scope["products"]))
+                        or stored_scope.get("writing_goal") != scope.get("writing_goal")
+                        or stored_scope.get("source_report_id") != scope.get("source_report_id")):
                     raise ValueError("TASK_SCOPE_CHANGED")
                 return decode(existing["output_summary"])
             discovery_call = p.reports.get_discovery_task(tx, context.budget.task_id)
@@ -116,15 +121,24 @@ class CompetitiveReportService:
                 matrix["status"] = "PARTIAL"
             analysis = CompetitiveAnalysisService().analyze(matrix, context)
             analysis.update(task=task.model_dump(), research_policy=context.audit_policy())
+            analysis["source_report_id"] = getattr(context, "source_report_id", None)
             analysis["discovery_run_id"] = discovery_call["run_id"] if discovery_call else None
             complete = analysis["status"] == "COMPLETE"
             report_type = "COMPETITIVE_ANALYSIS" if complete else "COMPETITIVE_ANALYSIS_PARTIAL"
             from competitive_intel.domain.comparison_presentation import reading_view
-            analysis["presentation"] = reading_view(task, analysis)
+            if getattr(context, "report_writer", None) is not None:
+                from competitive_intel.domain.analytical_writing import compose_analysis
+                analysis["presentation"] = compose_analysis(task, analysis, context.report_writer,
+                    goal=context.writing_goal, reviews=context.writing_reviews)
+            else:
+                analysis["presentation"] = reading_view(task, analysis)
+                analysis.update(ai_status="NOT_RUN", delivery_status="EVIDENCE_REPORT")
+            analysis["budget"] = context.budget.snapshot()
             markdown = render_competitive_report(task, analysis)
             result = {"phase": "competitive_analysis", "status": analysis["status"], "run_id": run_id,
                       "analysis_complete": complete, "budget": context.budget.snapshot(), "report_id": None,
-                      "research_policy": context.audit_policy(), "report_type": report_type}
+                      "research_policy": context.audit_policy(), "report_type": report_type,
+                      "ai_status": analysis["ai_status"], "delivery_status": analysis["delivery_status"]}
             with p.transaction() as tx:
                 result["report_id"] = p.reports.create(tx, competitor_id=products[0].product_id, run_id=run_id,
                     report_type=report_type, status="GENERATED", generator_version="competitive-report-v3",

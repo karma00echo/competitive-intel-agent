@@ -28,6 +28,14 @@ class ResearchContext:
         self.rates = rates or CostRates()
         self._factory = session_factory
         self._sessions = []
+        self.report_writer = None
+        self.writing_reviews = {}
+        self.writing_goal = ""
+
+    def enable_report_writer(self, attempt_file):
+        from competitive_intel.infrastructure.agent.analytical_writer import AnalyticalWriter
+        self.report_writer = AnalyticalWriter(self.settings.llm, self.session("synthesis"),
+            live_authorized=self.allow_paid, attempt_file=attempt_file)
 
     def session(self, purpose):
         if not self.allow_paid:
